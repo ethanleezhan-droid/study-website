@@ -32,7 +32,7 @@
     return t;
   }
   const id = p => `${p}-${++uid}`;
-  const money = v => (v < 0 ? '−$' : '$') + Math.abs(v).toFixed(2);
+  const money = v => (v < 0 ? '−$' : '$') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const trim = (v, d = 2) => {
     const r = Number(v.toFixed(d));
     return (Object.is(r, -0) ? 0 : r).toLocaleString('en-US', { maximumFractionDigits: d });
@@ -54,30 +54,35 @@
       Object.assign(c, { w, h: hgt, m });
       root.setAttribute('viewBox', `0 0 ${w} ${hgt}`);
       root.textContent = '';
+      const y0 = o.yMin || 0;
+      c.y0 = y0;
       c.X = v => m.l + (v / o.xMax) * (w - m.l - m.r);
-      c.Y = v => hgt - m.b - (v / o.yMax) * (hgt - m.t - m.b);
+      c.Y = v => hgt - m.b - ((v - y0) / (o.yMax - y0)) * (hgt - m.t - m.b);
       c.toData = (px, py) => [
         ((px - m.l) / (w - m.l - m.r)) * o.xMax,
-        ((hgt - m.b - py) / (hgt - m.t - m.b)) * o.yMax
+        y0 + ((hgt - m.b - py) / (hgt - m.t - m.b)) * (o.yMax - y0)
       ];
 
       const grid = s('g', { class: 'c-grid' }, root);
       const xFmt = o.xFmt || (v => trim(v));
       const yFmt = o.yFmt || (v => trim(v));
-      const xSkip = (c.X(o.xStep) - c.X(0)) < 34 ? 2 : 1;
-      let i = 0;
-      for (let v = 0; v <= o.xMax + 1e-9; v += o.xStep, i++) {
-        const x = c.X(v);
-        if (v > 0) s('line', { x1: x, x2: x, y1: c.Y(0), y2: c.Y(o.yMax), class: 'gridline' }, grid);
-        if (i % xSkip === 0) stext(grid, x, c.Y(0) + 17, xFmt(v), { class: 'tick', 'text-anchor': 'middle' });
+      if (!o.bare) {
+        const xSkip = (c.X(o.xStep) - c.X(0)) < 34 ? 2 : 1;
+        let i = 0;
+        for (let v = 0; v <= o.xMax + 1e-9; v += o.xStep, i++) {
+          const x = c.X(v);
+          if (v > 0) s('line', { x1: x, x2: x, y1: c.Y(y0), y2: c.Y(o.yMax), class: 'gridline' }, grid);
+          if (i % xSkip === 0) stext(grid, x, c.Y(y0) + 17, xFmt(v), { class: 'tick', 'text-anchor': 'middle' });
+        }
+        for (let v = y0; v <= o.yMax + 1e-9; v += o.yStep) {
+          const y = c.Y(v);
+          if (v !== y0) s('line', { x1: c.X(0), x2: c.X(o.xMax), y1: y, y2: y, class: 'gridline' }, grid);
+          stext(grid, c.X(0) - 8, y + 4, yFmt(v), { class: 'tick', 'text-anchor': 'end' });
+        }
       }
-      for (let v = 0; v <= o.yMax + 1e-9; v += o.yStep) {
-        const y = c.Y(v);
-        if (v > 0) s('line', { x1: c.X(0), x2: c.X(o.xMax), y1: y, y2: y, class: 'gridline' }, grid);
-        stext(grid, c.X(0) - 8, y + 4, yFmt(v), { class: 'tick', 'text-anchor': 'end' });
-      }
-      s('line', { x1: c.X(0), x2: c.X(o.xMax), y1: c.Y(0), y2: c.Y(0), class: 'axis' }, grid);
-      s('line', { x1: c.X(0), x2: c.X(0), y1: c.Y(0), y2: c.Y(o.yMax), class: 'axis' }, grid);
+      const axisY = y0 <= 0 ? 0 : y0;
+      s('line', { x1: c.X(0), x2: c.X(o.xMax), y1: c.Y(axisY), y2: c.Y(axisY), class: 'axis' }, grid);
+      s('line', { x1: c.X(0), x2: c.X(0), y1: c.Y(y0), y2: c.Y(o.yMax), class: 'axis' }, grid);
       stext(grid, (c.X(0) + c.X(o.xMax)) / 2, hgt - 6, o.xLabel, { class: 'axis-label', 'text-anchor': 'middle' });
       stext(grid, c.X(0) + 8, m.t - 12, o.yLabel, { class: 'axis-label', 'text-anchor': 'start' });
 
@@ -88,10 +93,11 @@
     /* Straight line P = a + kQ clipped to the plot box. Returns [[q,p],[q,p]] or null. */
     c.clip = (a, k) => {
       const o = c.opts;
+      const y0 = o.yMin || 0;
       let lo = 0, hi = o.xMax;
-      if (k === 0) { if (a < 0 || a > o.yMax) return null; }
+      if (k === 0) { if (a < y0 || a > o.yMax) return null; }
       else {
-        const q0 = -a / k, q1 = (o.yMax - a) / k;
+        const q0 = (y0 - a) / k, q1 = (o.yMax - a) / k;
         lo = Math.max(lo, Math.min(q0, q1));
         hi = Math.min(hi, Math.max(q0, q1));
       }
@@ -108,7 +114,7 @@
       }
     };
     c.vline = (q, cls, label) => {
-      s('line', { x1: c.X(q), x2: c.X(q), y1: c.Y(0), y2: c.Y(c.opts.yMax), class: cls }, c.layers.lines);
+      s('line', { x1: c.X(q), x2: c.X(q), y1: c.Y(c.y0), y2: c.Y(c.opts.yMax), class: cls }, c.layers.lines);
       if (label) stext(c.layers.labels, c.X(q) + 5, c.Y(c.opts.yMax) + 13, label, { class: 'curve-label ' + cls.replace(/\bcurve\b/g, '').trim() });
     };
     c.hline = (p, cls, label) => {
@@ -153,6 +159,20 @@
       s('line', { x1: c.X(q2), x2: c.X(q2), y1: y - 5, y2: y + 5, class: 'bracket ' + (cls || '') }, g);
       stext(c.layers.labels, (c.X(q1) + c.X(q2)) / 2, y + 16, str, { class: 'bracket-label ' + (cls || ''), 'text-anchor': 'middle' });
     };
+    /* Arrow from one data point to another, trimmed so it doesn't cover the dots. */
+    c.arrow = (q1, p1, q2, p2, cls) => {
+      const x1 = c.X(q1), y1 = c.Y(p1), x2 = c.X(q2), y2 = c.Y(p2);
+      const len = Math.hypot(x2 - x1, y2 - y1);
+      if (len < 22) return;
+      const ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+      const sx = x1 + ux * 9, sy = y1 + uy * 9, ex = x2 - ux * 10, ey = y2 - uy * 10;
+      const g = s('g', { class: 'arrow ' + (cls || '') }, c.layers.marks);
+      s('line', { x1: sx, y1: sy, x2: ex, y2: ey }, g);
+      const hl = 8, hw = 4.5;
+      s('polygon', { points: [[ex + ux * 2, ey + uy * 2], [ex - ux * hl - uy * hw, ey - uy * hl + ux * hw], [ex - ux * hl + uy * hw, ey - uy * hl - ux * hw]].map(pt => pt.join(',')).join(' ') }, g);
+    };
+    /* Free text placed at a data coordinate. */
+    c.text = (q, p, str, cls, anchor, dy) => stext(c.layers.labels, c.X(q), c.Y(p) + (dy || 0), str, { class: 'chart-note ' + (cls || ''), 'text-anchor': anchor || 'middle' });
     return c;
   }
 
@@ -275,6 +295,16 @@
       desc: 'Each unit produced causes damage to people outside the market. Set how much.',
       shifts: [], modes: ['externality'], mode: 'externality'
     },
+    'controls-basic': {
+      title: 'Price ceilings and floors',
+      desc: 'The market clears at $10. Choose a ceiling or a floor and move it above and below that price.',
+      shifts: [], modes: ['ceiling', 'floor'], mode: 'ceiling', simple: true
+    },
+    shifts: {
+      title: 'When demand and supply both shift',
+      desc: 'Choose which way each curve shifts, then which shift is bigger. Faded lines show where the market started.',
+      shifts: [], modes: ['none'], picker: true, simple: true
+    },
     full: {
       title: 'Market lab',
       desc: 'Shift supply and demand, try real-world events, and test price controls, taxes and pollution.',
@@ -303,7 +333,8 @@
       yFmt: v => '$' + v, ratio: P.compact ? 0.66 : 0.72, maxH: P.compact ? 340 : 420,
       label: 'Supply and demand graph'
     });
-    if (!P.compact) {
+    if (P.simple) f.plot.appendChild(legend([['demand', 'Demand'], ['supply', 'Supply']]));
+    else if (!P.compact) {
       f.plot.appendChild(legend([['demand', 'Demand'], ['supply', 'Supply'], ['cs', 'Consumer surplus'], ['ps', 'Producer surplus'], ['dwl', 'Deadweight loss']]));
     }
 
@@ -342,6 +373,32 @@
       panel.appendChild(sSl.row);
     }
 
+    /* "Both shift" picker: direction of each curve plus which shift is bigger. */
+    const pick = { d: 0, s: 0, big: 'equal' };
+    let bigSeg = null;
+    function applyPick() {
+      const both = pick.d !== 0 && pick.s !== 0;
+      const size = both ? ({ d: [25, 10], s: [10, 25], equal: [20, 20] })[pick.big] : [20, 20];
+      st.d = pick.d * size[0];
+      st.s = pick.s * size[1];
+      bigSeg.el.classList.toggle('is-disabled', !both);
+      bigSeg.el.querySelectorAll('button').forEach(b => { b.disabled = !both; });
+      update();
+    }
+    if (P.picker) {
+      const dirs = [[-1, 'Decrease'], [0, 'No change'], [1, 'Increase']];
+      const dSeg = segmented('Demand', dirs, 0, v => { pick.d = v; applyPick(); });
+      const sSeg = segmented('Supply', dirs, 0, v => { pick.s = v; applyPick(); });
+      bigSeg = segmented('Which shift is bigger', [['d', 'Demand (ΔD > ΔS)'], ['equal', 'Equal'], ['s', 'Supply (ΔD < ΔS)']], 'equal', v => { pick.big = v; applyPick(); });
+      panel.append(
+        h('p', { class: 'panel-label', text: 'Demand' }), dSeg.el,
+        h('p', { class: 'panel-label', text: 'Supply' }), sSeg.el,
+        h('p', { class: 'panel-label', text: 'Which shift is bigger?' }), bigSeg.el
+      );
+      bigSeg.el.classList.add('is-disabled');
+      bigSeg.el.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    }
+
     let seg = null;
     const modeCtl = h('div', { class: 'mode-ctl' });
     if (P.modes.length > 1) {
@@ -371,7 +428,7 @@
     const dl = h('dl', { class: 'readout' + (P.compact ? ' readout-mini' : '') });
     const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
     panel.append(dl, note);
-    if (!P.compact) {
+    if (!P.compact && !P.picker) {
       const reset = h('button', { type: 'button', class: 'btn btn-quiet', text: 'Reset' });
       reset.addEventListener('click', () => {
         Object.assign(st, { d: 0, s: 0, scenario: null, ceiling: 7, floor: 13, tax: 3, ext: 4, surplus: !!P.surplus, mode: P.mode || 'none' });
@@ -417,7 +474,7 @@
       const r = compute();
       chart.clear();
       const shifted = st.d !== 0 || st.s !== 0;
-      const showSurplus = st.surplus && st.mode !== 'externality';
+      const showSurplus = st.surplus && st.mode !== 'externality' && !P.simple;
 
       if (showSurplus && r.qt > 0) {
         chart.poly([[0, r.a], [r.qt, r.D(r.qt)], [r.qt, r.pb], [0, r.pb]], 'fill-cs');
@@ -426,7 +483,7 @@
       if (st.mode === 'tax' && st.tax > 0 && r.qt > 0) {
         chart.poly([[0, r.pSel], [r.qt, r.pSel], [r.qt, r.pb], [0, r.pb]], 'fill-rev');
       }
-      if (r.dwl > 0.001) {
+      if (r.dwl > 0.001 && !P.simple) {
         if (st.mode === 'externality') chart.poly([[r.qo, r.po], [r.qe, r.c + st.ext + B * r.qe], [r.qe, r.pe]], 'fill-dwl');
         else chart.poly([[r.qt, r.D(r.qt)], [r.qe, r.pe], [r.qt, r.S(r.qt)]], 'fill-dwl');
       }
@@ -468,6 +525,7 @@
         }
       }
 
+      if (P.picker && shifted) chart.arrow((A0 - C0) / (2 * B), 10, r.qe, r.pe);
       const eqIsOutcome = !r.binding && !(st.mode === 'tax' && st.tax > 0);
       if (eqIsOutcome) chart.guides(r.qe, r.pe, trim(r.qe, 1), money(r.pe));
       chart.dot(r.qe, r.pe, eqIsOutcome ? 'eq' : 'eq faded');
@@ -477,7 +535,9 @@
 
     function renderText(r) {
       const m = st.mode;
-      const surplusRows = [['Consumer surplus', money(r.cs), 'k-cs'], ['Producer surplus', money(r.ps), 'k-ps']];
+      const surplusRows = P.simple ? [] : [['Consumer surplus', money(r.cs), 'k-cs'], ['Producer surplus', money(r.ps), 'k-ps']];
+      const dwlRow = P.simple ? [] : [['Deadweight loss', money(r.dwl), 'k-dwl']];
+      if (P.picker) { pickerText(r); return; }
       if (P.compact) {
         readout(dl, [['Price', money(r.pe)], ['Quantity', trim(r.qe, 1)]]);
         note.textContent = st.d === 0
@@ -502,7 +562,7 @@
           ['Quantity supplied', trim(r.qs, 1)],
           [isC ? 'Shortage' : 'Surplus', trim(r.gap, 1), r.gap > 0 ? 'k-warn' : ''],
           ...surplusRows,
-          ['Deadweight loss', money(r.dwl), 'k-dwl']
+          ...dwlRow
         ]);
         note.textContent = r.binding
           ? (isC
@@ -536,6 +596,27 @@
       }
     }
 
+    function pickerText(r) {
+      const dir = v => Math.abs(v) < 1e-6 ? 'stays the same' : v > 0 ? 'rises' : 'falls';
+      const arrow = v => Math.abs(v) < 1e-6 ? '→ unchanged' : v > 0 ? '↑ rises' : '↓ falls';
+      const dp = r.pe - 10, dq = r.qe - 50;
+      readout(dl, [
+        ['Price', `$10.00 → ${money(r.pe)}`],
+        ['Quantity', `50 → ${trim(r.qe, 1)}`],
+        ['Equilibrium price', arrow(dp), dp > 1e-6 ? 'k-hot' : dp < -1e-6 ? 'k-good' : ''],
+        ['Equilibrium quantity', arrow(dq), dq > 1e-6 ? 'k-good' : dq < -1e-6 ? 'k-hot' : '']
+      ]);
+      const word = v => v > 0 ? 'increases' : 'decreases';
+      const bigText = ({ d: 'the demand shift is bigger (ΔD > ΔS)', s: 'the supply shift is bigger (ΔD < ΔS)', equal: 'the two shifts are equal (ΔD = ΔS)' })[pick.big];
+      let txt;
+      if (!pick.d && !pick.s) txt = 'Choose a change for demand, supply or both.';
+      else if (!pick.s) txt = `Only demand ${word(pick.d)}, so price and quantity both move the same way as demand: price ${dir(dp)} and quantity ${dir(dq)}.`;
+      else if (!pick.d) txt = `Only supply ${word(pick.s)}. Price moves the opposite way to supply and quantity moves the same way: price ${dir(dp)} and quantity ${dir(dq)}.`;
+      else if (pick.d === pick.s) txt = `Demand and supply both ${pick.d > 0 ? 'increase' : 'decrease'}, so quantity certainly ${dir(dq)}. Price is indeterminate: it depends on the sizes of the shifts. Here ${bigText}, so price ${dir(dp)}.`;
+      else txt = `Demand ${word(pick.d)} and supply ${word(pick.s)}, so price certainly ${dir(dp)}. Quantity is indeterminate: it depends on the sizes of the shifts. Here ${bigText}, so quantity ${dir(dq)}.`;
+      note.textContent = txt;
+    }
+
     function update() {
       scenarioBtns.forEach((b, i) => b.setAttribute('aria-pressed', String(st.scenario === i)));
       draw();
@@ -548,17 +629,23 @@
   /* ======================================================================
      PPF — pizzas vs robots, bowed-out frontier (quarter ellipse)
      ====================================================================== */
-  function ppf(host) {
+  const PPF_PRESETS = {
+    robots: { title: 'Production possibilities: pizzas or robots', x: 'Pizzas', y: 'Robots', curve: 'PPF', where: 'the frontier', whereNew: 'the new frontier' },
+    laptops: { title: 'Production possibility curve: laptops or pizzas', x: 'Pizzas', y: 'Laptops', curve: 'PPC', where: 'the PPC', whereNew: 'the new PPC' }
+  };
+  function ppf(host, presetName) {
+    const N = PPF_PRESETS[presetName] || PPF_PRESETS.robots;
+    const xs = N.x.toLowerCase(), ys = N.y.toLowerCase();
     const XM = 100, YM = 50, G = 1.2;
     const fy = (x, g) => YM * g * Math.sqrt(Math.max(0, 1 - Math.pow(x / (XM * g), 2)));
     const st = { x: 40, util: 100, growth: false, test: null };
-    const f = frame('Production possibilities: pizzas or robots', 'Move along the frontier, leave resources idle, or grow the economy. Click the graph to test any point.', 'lab-ppf');
+    const f = frame(N.title, 'Move along the curve, leave resources idle, or grow the economy. Click the graph to test any point.', 'lab-ppf');
     const chart = Chart(f.plot, {
-      xMax: 130, yMax: 65, xStep: 20, yStep: 10, xLabel: 'Pizzas', yLabel: 'Robots', left: 46, label: 'Production possibilities frontier'
+      xMax: 130, yMax: 65, xStep: 20, yStep: 10, xLabel: N.x, yLabel: N.y, left: 46, label: N.title
     });
-    f.plot.appendChild(legend([['frontier', 'Frontier'], ['frontier-grown', 'After growth'], ['point', 'Current output']]));
+    f.plot.appendChild(legend([['frontier', N.curve], ['frontier-grown', 'After growth'], ['point', 'Current output']]));
 
-    const xs = slider({ name: 'pizzas', label: 'Pizzas produced', min: 0, max: 100, step: 10, value: st.x, onInput: v => { st.x = v; draw(); } });
+    const xSl = slider({ name: 'pizzas', label: N.x + ' produced', min: 0, max: 100, step: 10, value: st.x, onInput: v => { st.x = v; draw(); } });
     const us = slider({ name: 'util', label: 'Resources in use', min: 50, max: 100, step: 10, value: 100, fmt: v => v + '%', onInput: v => { st.util = v; draw(); } });
     const gid = id('growth');
     const gBox = h('input', { type: 'checkbox', id: gid });
@@ -566,7 +653,7 @@
     const dl = h('dl', { class: 'readout' });
     const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
     const testNote = h('p', { class: 'lab-note lab-test', 'aria-live': 'polite', text: 'Click anywhere on the graph to test a point.' });
-    f.panel.append(xs.row, us.row, h('div', { class: 'check' }, [gBox, h('label', { for: gid, text: 'Show economic growth (+20%)' })]), dl, note, testNote);
+    f.panel.append(xSl.row, us.row, h('div', { class: 'check' }, [gBox, h('label', { for: gid, text: 'Show economic growth (+20%)' })]), dl, note, testNote);
 
     chart.root.addEventListener('click', e => {
       const pt = chart.root.createSVGPoint();
@@ -588,7 +675,7 @@
         chart.label(chart.X(XM * G * 0.72), chart.Y(fy(XM * G * 0.72, G)), 'After growth', 'frontier grown');
       }
       chart.path(pts(1), 'curve frontier');
-      chart.label(chart.X(XM * 0.72), chart.Y(fy(XM * 0.72, 1)), 'PPF', 'frontier');
+      chart.label(chart.X(XM * 0.72), chart.Y(fy(XM * 0.72, 1)), N.curve, 'frontier');
 
       const k = st.util / 100;
       const px = st.x * k, py = fy(st.x, 1) * k;
@@ -604,25 +691,25 @@
         const gm = s('g', { class: 'test-mark ' + cls }, chart.layers.marks);
         s('line', { x1: X - 6, y1: Y - 6, x2: X + 6, y2: Y + 6 }, gm);
         s('line', { x1: X - 6, y1: Y + 6, x2: X + 6, y2: Y - 6 }, gm);
-        const where = st.growth ? 'the new frontier' : 'the frontier';
-        testNote.textContent = `Test point: ${trim(tx, 0)} pizzas and ${trim(ty, 0)} robots. ` + ({
+        const where = st.growth ? N.whereNew : N.where;
+        testNote.textContent = `Test point: ${trim(tx, 0)} ${xs} and ${trim(ty, 0)} ${ys}. ` + ({
           inside: `It’s inside ${where}: attainable, but some resources would be idle or wasted.`,
           on: `It’s on ${where}: attainable and efficient.`,
           outside: `It’s outside ${where}: unattainable with the resources and technology available.`
         })[cls];
       }
 
-      const rows = [['Pizzas', trim(px, 1)], ['Robots', trim(py, 1)]];
-      if (k === 1 && st.x < XM) rows.push(['Cost of 10 more pizzas', trim(fy(st.x, 1) - fy(st.x + 10, 1), 1) + ' robots', 'k-warn']);
+      const rows = [[N.x, trim(px, 1)], [N.y, trim(py, 1)]];
+      if (k === 1 && st.x < XM) rows.push([`Cost of 10 more ${xs}`, trim(fy(st.x, 1) - fy(st.x + 10, 1), 1) + ' ' + ys, 'k-warn']);
       readout(dl, rows);
       if (k < 1) {
-        note.textContent = `Only ${st.util}% of resources are in use, so the economy is inside its frontier, as in a recession. It could have more pizzas and more robots at no cost by putting idle resources back to work.`;
+        note.textContent = `Only ${st.util}% of resources are in use, so the economy is inside ${N.where}, as in a recession. It could have more ${xs} and more ${ys} at no cost by putting idle resources back to work.`;
       } else if (st.x >= XM) {
-        note.textContent = 'All resources go to pizza. The last 10 pizzas cost the most robots of all, because they use the resources worst suited to making pizza.';
+        note.textContent = `All resources go to ${xs}. The last 10 ${xs} cost the most ${ys} of all, because they use the resources worst suited to making ${xs}.`;
       } else {
-        note.textContent = `On the frontier, so production is efficient. Making 10 more pizzas would mean giving up ${trim(fy(st.x, 1) - fy(st.x + 10, 1), 1)} robots, and each further 10 costs more than the last.`;
+        note.textContent = `On ${N.where}, so production is efficient. Making 10 more ${xs} would mean giving up ${trim(fy(st.x, 1) - fy(st.x + 10, 1), 1)} ${ys}, and each further 10 costs more than the last.`;
       }
-      if (st.growth) note.textContent += ' With growth, the frontier shifts out by 20%, and combinations between the two curves become possible.';
+      if (st.growth) note.textContent += ` With growth, ${N.where} shifts out by 20%, and combinations between the two curves become possible.`;
     }
 
     host.appendChild(f.fig);
@@ -932,8 +1019,567 @@
     autosize(chart, f.plot, draw);
   }
 
+  /* ======================================================================
+     SHIFTER — movement along a curve vs a shift of the curve (Topics 2–3)
+     Pizzas: D: P = 25 − 0.5Q, S: P = −5 + 0.5Q (Q in millions per year)
+     ====================================================================== */
+  const SHIFTER_PRESETS = {
+    demand: {
+      title: 'Movement along demand, or a shift of demand?',
+      desc: 'Change the price of pizza to move along the curve. Pick an event to see whether it shifts the curve, and which way. Predict before you click.',
+      kind: 'demand', a: 25, k: -0.5, qWord: 'Quantity demanded', curve: 'D',
+      events: [
+        { label: 'Population grows', shift: 10, det: 'Number of buyers', text: 'More people means more buyers. Demand increases: the curve shifts right, so more pizzas are demanded at every price.' },
+        { label: 'Pizza becomes a trend on social media', shift: 10, det: 'Tastes and preferences', text: 'Tastes move in favour of pizza. Demand increases: the curve shifts right.' },
+        { label: 'Buyers expect pizza prices to rise next month', shift: 10, det: 'Expectations of buyers', text: 'People buy now before the price goes up. Today’s demand increases: the curve shifts right.' },
+        { label: 'Incomes fall (pizza is a normal good)', shift: -10, det: 'Income', text: 'For a normal good, lower incomes mean lower demand. The curve shifts left.' },
+        { label: 'Burgers (a substitute) get cheaper', shift: -10, det: 'Price of a related good (substitute)', text: 'Some buyers switch to the cheaper substitute. Demand for pizza decreases: the curve shifts left.' },
+        { label: 'Soft drinks (a complement) get more expensive', shift: -10, det: 'Price of a related good (complement)', text: 'Pizza and soft drinks are bought together, so a dearer complement makes the pair less attractive. Demand for pizza decreases: the curve shifts left.' }
+      ]
+    },
+    supply: {
+      title: 'Movement along supply, or a shift of supply?',
+      desc: 'Change the price of pizza to move along the curve. Pick an event to see whether it shifts the curve, and which way. Predict before you click.',
+      kind: 'supply', a: -5, k: 0.5, qWord: 'Quantity supplied', curve: 'S',
+      events: [
+        { label: 'More pizza shops open', shift: 10, det: 'Number of sellers', text: 'More sellers means more pizzas offered at every price. Supply increases: the curve shifts right.' },
+        { label: 'Faster ovens are invented', shift: 10, det: 'Technology', text: 'Better technology lowers the cost of making each pizza. Supply increases: the curve shifts right.' },
+        { label: 'The price of cheese rises', shift: -10, det: 'Resource prices', text: 'A key input costs more, so production costs rise. Supply decreases: the curve shifts left.' },
+        { label: 'The government taxes each pizza sold', shift: -10, det: 'Taxes and subsidies', text: 'A tax raises the cost of production. Supply decreases: the curve shifts left.' },
+        { label: 'The government subsidises pizza makers', shift: 10, det: 'Taxes and subsidies', text: 'A subsidy lowers the cost of production. Supply increases: the curve shifts right.' },
+        { label: 'Pasta prices rise (same ovens and cooks)', shift: -10, det: 'Price of a substitute in production', text: 'Pasta competes for the same ovens and cooks and is now more profitable, so shops switch resources to pasta. Supply of pizza decreases: the curve shifts left.' }
+      ]
+    }
+  };
+
+  function shifter(host, presetName) {
+    const P = SHIFTER_PRESETS[presetName] || SHIFTER_PRESETS.demand;
+    const st = { price: 15, shift: 0, event: null, moved: false };
+    const f = frame(P.title, P.desc, 'lab-shifter');
+    const chart = Chart(f.plot, {
+      xMax: 60, yMax: 25, xStep: 10, yStep: 5, xLabel: 'Pizzas (millions per year)', yLabel: 'Price', yFmt: v => '$' + v,
+      ratio: 0.72, label: 'Pizza ' + P.kind + ' curve'
+    });
+    f.plot.appendChild(legend([[P.kind, P.kind === 'demand' ? 'Demand' : 'Supply'], ['point', 'Where the market is']]));
+    const q = (price, shift) => (price - P.a) / P.k + shift;
+
+    const prSl = slider({
+      name: 'price', label: 'Price of a pizza', min: 5, max: 20, step: 1, value: st.price, fmt: v => '$' + v,
+      onInput: v => { st.price = v; st.moved = v !== 15; draw(); }
+    });
+    const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Events' });
+    const btns = P.events.map((ev, i) => {
+      const b = h('button', { type: 'button', class: 'chip', 'aria-pressed': 'false', text: ev.label });
+      b.addEventListener('click', () => { st.event = st.event === i ? null : i; st.shift = st.event == null ? 0 : ev.shift; draw(); });
+      chips.appendChild(b);
+      return b;
+    });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    const reset = h('button', { type: 'button', class: 'btn btn-quiet', text: 'Reset' });
+    reset.addEventListener('click', () => { Object.assign(st, { price: 15, shift: 0, event: null, moved: false }); prSl.set(15); draw(); });
+    f.panel.append(prSl.row, h('p', { class: 'panel-label', text: 'Something else changes' }), chips, dl, note, reset);
+
+    function draw() {
+      btns.forEach((b, i) => b.setAttribute('aria-pressed', String(st.event === i)));
+      chart.clear();
+      const shifted = st.shift !== 0;
+      const cls = 'curve ' + P.kind;
+      const a1 = P.a - P.k * st.shift; // intercept of the shifted curve: P = a1 + kQ
+      const at = P.kind === 'demand' ? 'start' : 'end';
+      if (shifted) {
+        chart.line(P.a, P.k, cls + ' ghost', P.curve, at);
+        chart.line(a1, P.k, cls, P.curve + '₁', at);
+      } else chart.line(P.a, P.k, cls, P.curve, at);
+
+      const q0 = q(15, 0), qNow = q(st.price, st.shift), qBase = q(st.price, 0);
+      if (st.moved && !shifted) {
+        chart.dot(q0, 15, 'ghost');
+        chart.arrow(q0, 15, qNow, st.price);
+      }
+      if (shifted) {
+        chart.dot(qBase, st.price, 'ghost');
+        chart.arrow(qBase, st.price, qNow, st.price);
+      }
+      chart.guides(qNow, st.price, trim(qNow, 0), '$' + st.price, 'point');
+      chart.dot(qNow, st.price, 'point');
+
+      const ev = st.event != null ? P.events[st.event] : null;
+      const change = shifted ? (P.kind === 'demand' ? 'Change in demand' : 'Change in supply')
+        : st.moved ? 'Change in ' + P.qWord.toLowerCase() : 'None yet';
+      readout(dl, [
+        ['Price', '$' + st.price],
+        [P.qWord, trim(qNow, 0) + 'm'],
+        ['What changed', change, 'k-wide' + (shifted ? ' k-hot' : st.moved ? ' k-good' : '')],
+        ...(ev ? [['Determinant', ev.det, 'k-wide']] : [])
+      ]);
+      let txt;
+      if (ev) {
+        txt = ev.text + ` At $${st.price}, ${P.qWord.toLowerCase()} goes from ${trim(qBase, 0)}m to ${trim(qNow, 0)}m, even though the price of pizza didn’t change.`;
+        if (st.moved) txt += ' (You also changed the price, which is a movement along the new curve.)';
+      } else if (st.moved) {
+        const up = st.price > 15;
+        txt = `Only the pizza’s own price changed, from $15 to $${st.price}. That’s a ${up ? 'upward' : 'downward'} movement along the same ${P.kind} curve: ${P.qWord.toLowerCase()} ${(P.kind === 'demand') === up ? 'falls' : 'rises'} from ${trim(q0, 0)}m to ${trim(qNow, 0)}m. The curve itself doesn’t move.`;
+      } else {
+        txt = `At $15, ${P.qWord.toLowerCase()} is ${trim(q0, 0)}m pizzas a year. Move the price, or pick an event.`;
+      }
+      note.textContent = txt;
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     SCHEDULE — the chocolate bar market from Topic 4
+     ====================================================================== */
+  function schedule(host) {
+    const rows = [[0.5, 22, 0], [1, 15, 6], [1.5, 10, 10], [2, 7, 13], [2.5, 5, 15]];
+    const st = { i: 3 };
+    const f = frame('The chocolate bar market', 'Pick a price to see the surplus or shortage, then step the price toward equilibrium.', 'lab-schedule');
+    const chart = Chart(f.plot, {
+      xMax: 25, yMax: 3, xStep: 5, yStep: 0.5, xLabel: 'Chocolate bars', yLabel: 'Price', yFmt: v => '$' + v.toFixed(2),
+      left: 60, ratio: 0.72, label: 'Chocolate bar demand and supply schedule'
+    });
+    f.plot.appendChild(legend([['demand', 'Demand'], ['supply', 'Supply']]));
+    const seg = segmented('Price', rows.map((r, i) => [i, '$' + r[0].toFixed(2)]), st.i, v => { st.i = v; draw(); });
+    const table = h('div', { class: 'table-wrap' });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    const step = h('button', { type: 'button', class: 'btn', text: 'Let the market adjust one step' });
+    step.addEventListener('click', () => {
+      if (st.i === 2) return;
+      st.i += st.i > 2 ? -1 : 1;
+      seg.select(st.i);
+      draw();
+    });
+    f.panel.append(h('p', { class: 'panel-label', text: 'Price per bar' }), seg.el, table, dl, note, step);
+
+    function draw() {
+      const [p, qd, qs] = rows[st.i];
+      chart.clear();
+      chart.path(rows.map(r => [r[1], r[0]]), 'curve demand');
+      chart.path(rows.map(r => [r[2], r[0]]), 'curve supply');
+      rows.forEach(r => { chart.dot(r[1], r[0], 'demand-dot small'); chart.dot(r[2], r[0], 'supply-dot small'); });
+      chart.label(chart.X(rows[4][1]), chart.Y(rows[4][0]), 'D', 'demand');
+      chart.label(chart.X(rows[4][2]), chart.Y(rows[4][0]), 'S', 'supply');
+      chart.hline(p, 'control' + (st.i === 2 ? ' slack' : ''));
+      chart.dot(10, 1.5, 'eq');
+      if (st.i !== 2) {
+        const lo = Math.min(qd, qs), hi = Math.max(qd, qs);
+        chart.bracket(lo, hi, p, (qs > qd ? 'Surplus ' : 'Shortage ') + (hi - lo), 'gap');
+        chart.arrow(hi + 3, p, hi + 3, p + (qs > qd ? -0.42 : 0.42), 'pressure');
+      }
+      chart.guides(10, 1.5, '10', '$1.50');
+      table.innerHTML = `<table class="num"><thead><tr><th>Price</th><th>Qd</th><th>Qs</th><th>Qs − Qd</th></tr></thead><tbody>${
+        rows.map((r, i) => `<tr${i === st.i ? ' class="is-sel"' : ''}><td>$${r[0].toFixed(2)}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[2] - r[1] > 0 ? '+' : ''}${r[2] - r[1]}</td></tr>`).join('')
+      }</tbody></table>`;
+      const gap = qs - qd;
+      readout(dl, [
+        ['Quantity demanded', String(qd)],
+        ['Quantity supplied', String(qs)],
+        [gap > 0 ? 'Surplus' : gap < 0 ? 'Shortage' : 'Surplus or shortage', gap === 0 ? 'None' : String(Math.abs(gap)), gap === 0 ? 'k-good' : 'k-warn']
+      ]);
+      if (gap > 0) note.textContent = `At $${p.toFixed(2)}, sellers offer ${qs} bars but buyers want only ${qd}: a surplus of ${gap}. Firms cut the price to sell their stock. As the price falls, quantity demanded rises and quantity supplied falls.`;
+      else if (gap < 0) note.textContent = `At $${p.toFixed(2)}, buyers want ${qd} bars but sellers offer only ${qs}: a shortage of ${-gap}. The price rises. As it rises, quantity demanded falls and quantity supplied rises.`;
+      else note.textContent = 'At $1.50, quantity demanded equals quantity supplied (10 bars). The market clears and there is no pressure on the price to change. This is equilibrium.';
+      step.disabled = st.i === 2;
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     ELASTICITY (module) — price (midpoint), income and cross price (simple)
+     ====================================================================== */
+  function elasticityModule(host) {
+    const f = frame('Elasticity calculator', 'Pick an elasticity, enter the old and new values, and read the result. The formulas match your notes.', 'lab-calc lab-elastic');
+    f.body.classList.add('lab-body-calc');
+    const MODES = {
+      price: { name: 'Price elasticity (midpoint)', a: ['Old price', 'New price'], b: ['Old quantity', 'New quantity'], vals: [25, 30, 20000, 10000], prefix: '$' },
+      income: { name: 'Income elasticity (simple)', a: ['Old income', 'New income'], b: ['Old quantity', 'New quantity'], vals: [2000, 2200, 20, 23], prefix: '$' },
+      cross: { name: 'Cross price elasticity (simple)', a: ['Old price of good B', 'New price of good B'], b: ['Old quantity of good A', 'New quantity of good A'], vals: [1, 1.1, 1000, 1080], prefix: '$' }
+    };
+    const st = { mode: 'price', v: {} };
+    Object.keys(MODES).forEach(k => { st.v[k] = MODES[k].vals.slice(); });
+    const seg = segmented('Elasticity type', Object.keys(MODES).map(k => [k, MODES[k].name.split(' (')[0]]), 'price', m => { st.mode = m; build(); });
+    const fields = h('div', { class: 'el-grid el-grid-4' });
+    const formula = h('p', { class: 'lab-formula' });
+    const meter = h('div', { class: 'meter', 'aria-hidden': 'true' }, [
+      h('div', { class: 'meter-track' }, [h('span', { class: 'meter-zone inelastic', text: 'Inelastic' }), h('span', { class: 'meter-zone elastic', text: 'Elastic' })]),
+      h('div', { class: 'meter-marker' }),
+      h('div', { class: 'meter-scale' }, ['0', '1', '2', '3+'].map(t => h('span', { text: t })))
+    ]);
+    f.plot.append(seg.el, fields, formula, meter);
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+
+    function build() {
+      const M = MODES[st.mode];
+      fields.textContent = '';
+      const labels = [M.a[0], M.a[1], M.b[0], M.b[1]];
+      labels.forEach((lab, i) => {
+        const fid = id('elm-' + st.mode + i);
+        const inp = h('input', { type: 'number', id: fid, min: '0', step: 'any', value: st.v[st.mode][i], inputmode: 'decimal' });
+        inp.addEventListener('input', () => { st.v[st.mode][i] = parseFloat(inp.value); calc(); });
+        const pre = i < 2 ? M.prefix : null;
+        fields.appendChild(h('div', { class: 'field' + (pre ? ' has-prefix' : '') }, [h('label', { for: fid, text: lab }), pre ? h('span', { class: 'prefix', text: pre, 'aria-hidden': 'true' }) : null, inp]));
+      });
+      formula.innerHTML = st.mode === 'price'
+        ? 'Price Ed = %ΔQ ÷ %ΔP, with each % change taken from the <strong>average</strong> of old and new.'
+        : st.mode === 'income'
+          ? 'Y Ed = %ΔQ ÷ %ΔY, with each % change taken from the <strong>old</strong> value.'
+          : 'XP Ed = %ΔQ<sub>A</sub> ÷ %ΔP<sub>B</sub>, with each % change taken from the <strong>old</strong> value.';
+      meter.hidden = st.mode !== 'price';
+      calc();
+    }
+
+    function calc() {
+      const [a1, a2, b1, b2] = st.v[st.mode];
+      if (![a1, a2, b1, b2].every(x => isFinite(x) && x > 0)) {
+        readout(dl, []);
+        note.textContent = 'Enter numbers greater than zero in every box.';
+        return;
+      }
+      if (a1 === a2) {
+        readout(dl, []);
+        note.textContent = st.mode === 'price' ? 'The price didn’t change, so there is nothing to measure. Enter two different prices.' : 'The old and new values are the same. Enter two different values.';
+        return;
+      }
+      if (st.mode === 'price') {
+        const dq = (b2 - b1) / ((b1 + b2) / 2), dp = (a2 - a1) / ((a1 + a2) / 2);
+        const e = Math.abs(dq / dp);
+        const simpleAB = Math.abs(((b2 - b1) / b1) / ((a2 - a1) / a1));
+        const simpleBA = Math.abs(((b1 - b2) / b2) / ((a1 - a2) / a2));
+        const kind = Math.abs(e - 1) < 0.005 ? 'unitary elastic' : e > 1 ? 'elastic' : e === 0 ? 'perfectly inelastic' : 'inelastic';
+        const r1 = a1 * b1, r2 = a2 * b2;
+        readout(dl, [
+          ['% change in quantity', pct(dq)],
+          ['% change in price', pct(dp)],
+          ['Price Ed (midpoint)', trim(e), 'k-big'],
+          ['Demand is', kind, 'k-wide'],
+          ['Simple formula, old → new', trim(simpleAB)],
+          ['Simple formula, new → old', trim(simpleBA)],
+          ['TR before', money(r1)],
+          ['TR after', money(r2), r2 > r1 ? 'k-good' : r2 < r1 ? 'k-warn' : '']
+        ]);
+        meter.style.setProperty('--pos', (Math.min(e, 3) / 3 * 100) + '%');
+        let txt = `Demand is ${kind}. Total revenue ${r2 > r1 ? 'rose' : r2 < r1 ? 'fell' : 'stayed the same'} from ${money(r1)} to ${money(r2)}`;
+        txt += e > 1.005 ? ', since with elastic demand, price and TR move in opposite directions.' : e < 0.995 ? ', since with inelastic demand, price and TR move in the same direction.' : ', since with unitary elastic demand, TR doesn’t change.';
+        if (Math.abs(simpleAB - simpleBA) > 0.01) txt += ` The simple formula gives ${trim(simpleAB)} one way and ${trim(simpleBA)} the other, which is why price elasticity uses the midpoint formula.`;
+        if (dq * dp > 0) txt += ' Price and quantity moved the same way, which breaks the law of demand. Check your numbers.';
+        note.textContent = txt;
+      } else {
+        const dq = (b2 - b1) / b1, da = (a2 - a1) / a1;
+        const e = dq / da;
+        let kind, txt;
+        if (st.mode === 'income') {
+          kind = Math.abs(e) < 0.005 ? 'Not affected by income' : e > 0 ? 'Normal good' : 'Inferior good';
+          txt = Math.abs(e) < 0.005
+            ? 'Quantity didn’t respond to income at all.'
+            : e > 0
+              ? `Y Ed is positive (${trim(e)}): income and quantity demanded move in the same direction, so this is a normal good.${e > 1 ? ' Because it is above 1, it’s also income elastic, a luxury (not tested).' : ' Because it is between 0 and 1, it’s also income inelastic, a necessity (not tested).'}`
+              : `Y Ed is negative (${trim(e)}): income and quantity demanded move in opposite directions, so this is an inferior good.`;
+        } else {
+          kind = Math.abs(e) < 0.005 ? 'Unrelated goods' : e > 0 ? 'Substitutes' : 'Complements';
+          txt = Math.abs(e) < 0.005
+            ? 'XP Ed is zero: a change in the price of B has no effect on A. The goods are unrelated.'
+            : e > 0
+              ? `XP Ed is positive (${trim(e)}): when B gets dearer, people buy more A instead. A and B are substitutes.`
+              : `XP Ed is negative (${trim(e)}): when B gets dearer, people buy less of A too. A and B are complements.`;
+        }
+        readout(dl, [
+          ['% change in quantity' + (st.mode === 'cross' ? ' of A' : ''), pct(dq)],
+          [st.mode === 'income' ? '% change in income' : '% change in price of B', pct(da)],
+          [st.mode === 'income' ? 'Y Ed' : 'XP Ed', (e > 0 ? '+' : '') + trim(e), 'k-big'],
+          ['Result', kind, 'k-wide']
+        ]);
+        note.textContent = txt;
+      }
+    }
+    build();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     PRODUCTION — TP, MP and AP from the wheat farm in Topic 6
+     ====================================================================== */
+  function production(host) {
+    const TP = [0, 10, 22, 33, 42, 48, 50, 48];
+    const MP = TP.map((t, i) => i ? t - TP[i - 1] : null);
+    const AP = TP.map((t, i) => i ? t / i : null);
+    const st = { L: 3 };
+    const f = frame('Adding workers to a fixed farm', 'Add workers one at a time. Watch how each extra worker changes total output, and why.', 'lab-production');
+    const top = h('div', { class: 'plot-stack' });
+    const bot = h('div', { class: 'plot-stack' });
+    f.plot.append(top, bot);
+    const c1 = Chart(top, { xMax: 7, yMax: 60, xStep: 1, yStep: 10, xLabel: 'Workers per day', yLabel: 'Total product (bushels)', left: 44, ratio: 0.5, maxH: 280, label: 'Total product curve' });
+    const c2 = Chart(bot, { xMax: 7, yMin: -4, yMax: 14, xStep: 1, yStep: 2, xLabel: 'Workers per day', yLabel: 'MP and AP (bushels)', left: 44, ratio: 0.5, maxH: 280, label: 'Marginal and average product curves' });
+    f.plot.appendChild(legend([['tp', 'Total product'], ['supply', 'Marginal product'], ['demand', 'Average product']]));
+    const sl = slider({ name: 'workers', label: 'Number of workers', min: 0, max: 7, step: 1, value: st.L, onInput: v => { st.L = v; draw(); } });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(sl.row, dl, note);
+
+    function draw() {
+      const L = st.L;
+      c1.clear(); c2.clear();
+      c1.path(TP.map((t, i) => [i, t]), 'curve tp');
+      TP.forEach((t, i) => c1.dot(i, t, 'small' + (i === L ? ' point' : ' tp-dot')));
+      if (L > 0) {
+        c1.path([[L - 1, TP[L - 1]], [L, TP[L - 1]], [L, TP[L]]], 'rise', 'marks');
+        c1.text(L + 0.12, (TP[L - 1] + TP[L]) / 2, 'MP ' + (MP[L] > 0 ? '+' : '') + MP[L], 'rise-label', 'start', 4);
+        c1.guides(L, TP[L], null, String(TP[L]), 'point');
+      }
+      c2.path(MP.slice(1).map((m, i) => [i + 1, m]), 'curve supply');
+      c2.path(AP.slice(1).map((a, i) => [i + 1, a]), 'curve demand');
+      c2.label(c2.X(7), c2.Y(MP[7]), 'MP', 'supply');
+      c2.label(c2.X(7), c2.Y(AP[7]), 'AP', 'demand');
+      if (L > 0) {
+        c2.dot(L, MP[L], 'supply-dot');
+        c2.dot(L, AP[L], 'demand-dot');
+        s('line', { x1: c2.X(L), x2: c2.X(L), y1: c2.Y(-4), y2: c2.Y(14), class: 'guide' }, c2.layers.marks);
+      }
+      let stage = '—', cls = '';
+      if (L >= 1 && L <= 2) { stage = 'Increasing marginal returns'; cls = 'k-good'; }
+      else if (L >= 3 && L <= 6) { stage = 'Diminishing marginal returns'; cls = 'k-warn'; }
+      else if (L === 7) { stage = 'Negative marginal returns'; cls = 'k-hot'; }
+      readout(dl, [
+        ['Workers', String(L)],
+        ['Total product', String(TP[L])],
+        ['Marginal product', L ? String(MP[L]) : '–'],
+        ['Average product', L ? trim(AP[L], 1) : '–'],
+        ['Stage', stage, 'k-wide ' + cls]
+      ]);
+      const cmp = L < 2 ? '' : MP[L] > AP[L - 1] + 1e-9 ? ` MP (${MP[L]}) is above the previous AP (${trim(AP[L - 1], 1)}), so AP rises to ${trim(AP[L], 1)}.`
+        : Math.abs(MP[L] - AP[L]) < 1e-9 ? ` MP (${MP[L]}) equals AP (${trim(AP[L], 1)}): AP is at its maximum.`
+          : ` MP (${MP[L]}) is below the previous AP (${trim(AP[L - 1], 1)}), so AP falls to ${trim(AP[L], 1)}.`;
+      const texts = {
+        0: 'No workers, no wheat. Add the first worker.',
+        1: 'The first worker produces 10 bushels. One person has far more land and equipment than they can use well.',
+        2: 'The second worker adds 12 bushels, more than the first. Two workers can specialise and make better use of the fixed land and equipment, so output increases at an increasing rate.',
+        3: 'The third worker adds 11 bushels, less than the second. Diminishing returns have set in: each worker now has less of the fixed input to work with.',
+        4: 'The fourth worker adds only 9 bushels. Output is still rising, but at a decreasing rate.',
+        5: 'The fifth worker adds 6 bushels. Diminishing returns are getting stronger.',
+        6: 'The sixth worker adds just 2 bushels. Total product reaches its maximum of 50.',
+        7: 'The seventh worker makes output fall by 2 bushels. There are too many workers for too little land and equipment, and they get in each other’s way.'
+      };
+      note.textContent = texts[L] + cmp;
+    }
+    host.appendChild(f.fig);
+    const fit2 = () => { c2.build(bot.clientWidth || 480); };
+    autosize(c1, top, () => { fit2(); draw(); });
+    if ('ResizeObserver' in window) new ResizeObserver(() => { fit2(); draw(); }).observe(bot);
+  }
+
+  /* ======================================================================
+     COSTS — short-run cost curves: TVC = k(12Q − 1.2Q² + 0.06Q³), TFC = F
+     ====================================================================== */
+  function costs(host) {
+    const st = { q: 8, F: 60, k: 1, view: 'avg', last: null };
+    const TVC = (q, k) => k * (12 * q - 1.2 * q * q + 0.06 * q * q * q);
+    const MCf = (q, k) => k * (12 - 2.4 * q + 0.18 * q * q);
+    const f = frame('Short-run cost curves', 'Move along the output axis, then change fixed and variable costs to see which curves shift.', 'lab-costs');
+    const chart = Chart(f.plot, { xMax: 20, yMax: 30, xStep: 2, yStep: 5, xLabel: 'Output (units per day)', yLabel: 'Cost per unit ($)', yFmt: v => '$' + v, left: 50, ratio: 0.72, label: 'Cost curves' });
+    const leg = h('div');
+    f.plot.appendChild(leg);
+    const viewSeg = segmented('Curves shown', [['avg', 'Per-unit costs'], ['tot', 'Total costs']], 'avg', v => { st.view = v; setView(); draw(); });
+    const qSl = slider({ name: 'output', label: 'Output', min: 1, max: 20, step: 1, value: st.q, fmt: v => v + ' units', onInput: v => { st.q = v; st.last = 'q'; draw(); } });
+    const fSl = slider({ name: 'fixed', label: 'Total fixed cost (e.g. rent)', min: 0, max: 120, step: 10, value: st.F, fmt: v => '$' + v, onInput: v => { st.F = v; st.last = 'F'; draw(); } });
+    const kSl = slider({ name: 'variable', label: 'Variable input prices (e.g. wage rate)', min: 0.5, max: 1.5, step: 0.1, value: st.k, fmt: v => Math.round(v * 100) + '%', onInput: v => { st.k = v; st.last = 'k'; draw(); } });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    const reset = h('button', { type: 'button', class: 'btn btn-quiet', text: 'Reset' });
+    reset.addEventListener('click', () => { Object.assign(st, { q: 8, F: 60, k: 1, last: null }); qSl.set(8); fSl.set(60); kSl.set(1); draw(); });
+    f.panel.append(h('p', { class: 'panel-label', text: 'Show' }), viewSeg.el, qSl.row, fSl.row, kSl.row, dl, note, reset);
+
+    function setView() {
+      leg.textContent = '';
+      if (st.view === 'avg') {
+        Object.assign(chart.opts, { yMax: 30, yStep: 5, yLabel: 'Cost per unit ($)' });
+        leg.appendChild(legend([['mc', 'MC'], ['atc', 'ATC'], ['avc', 'AVC'], ['afc', 'AFC']]));
+      } else {
+        const top = Math.max(100, Math.ceil((st.F + TVC(20, 1.5)) / 100) * 100);
+        Object.assign(chart.opts, { yMax: top, yStep: top / 5, yLabel: 'Total cost ($)' });
+        leg.appendChild(legend([['tc', 'TC'], ['tvc', 'TVC'], ['tfc', 'TFC']]));
+      }
+      chart.build(f.plot.clientWidth || 520);
+    }
+
+    function curve(fn, lo, cls, label) {
+      const pts = [];
+      for (let q = lo; q <= 20.001; q += 0.1) {
+        const v = fn(q);
+        if (v <= chart.opts.yMax && v >= 0) pts.push([q, v]);
+      }
+      if (pts.length > 1) {
+        chart.path(pts, 'curve ' + cls);
+        const end = pts[pts.length - 1];
+        chart.label(chart.X(end[0]), chart.Y(end[1]), label, cls);
+      }
+    }
+
+    function draw() {
+      chart.clear();
+      const { q, F, k } = st;
+      const tvc = TVC(q, k), tc = F + tvc;
+      const vals = { AFC: F / q, AVC: tvc / q, ATC: tc / q, MC: MCf(q, k) };
+      if (st.view === 'avg') {
+        curve(x => F / x, 0.5, 'afc', 'AFC');
+        curve(x => TVC(x, k) / x, 0.5, 'avc', 'AVC');
+        curve(x => (F + TVC(x, k)) / x, 0.5, 'atc', 'ATC');
+        curve(x => MCf(x, k), 0.3, 'mc', 'MC');
+        chart.dot(10, TVC(10, k) / 10, 'min-dot');
+        s('line', { x1: chart.X(q), x2: chart.X(q), y1: chart.Y(0), y2: chart.Y(30), class: 'guide' }, chart.layers.marks);
+        [['AFC', 'afc'], ['AVC', 'avc'], ['ATC', 'atc'], ['MC', 'mc']].forEach(([key, cls]) => { if (vals[key] <= 30) chart.dot(q, vals[key], cls + '-dot'); });
+      } else {
+        chart.hline(F, 'curve tfc', 'TFC');
+        curve(x => TVC(x, k), 0, 'tvc', 'TVC');
+        curve(x => F + TVC(x, k), 0, 'tc', 'TC');
+        if (F > 0) {
+          s('line', { x1: chart.X(q) + 6, x2: chart.X(q) + 6, y1: chart.Y(tvc), y2: chart.Y(tc), class: 'bracket gap-fc' }, chart.layers.marks);
+          chart.text(q, (tvc + tc) / 2, ' = TFC', 'gap-fc-label', 'start', 4);
+        }
+        s('line', { x1: chart.X(q), x2: chart.X(q), y1: chart.Y(0), y2: chart.Y(chart.opts.yMax), class: 'guide' }, chart.layers.marks);
+        chart.dot(q, tvc, 'tvc-dot');
+        chart.dot(q, tc, 'tc-dot');
+      }
+      readout(dl, [
+        ['TFC', money(F)], ['TVC', money(tvc)], ['TC', money(tc)],
+        ['AFC', money(vals.AFC)], ['AVC', money(vals.AVC)], ['ATC', money(vals.ATC)],
+        ['MC', money(vals.MC), 'k-hot']
+      ]);
+      let txt;
+      if (st.last === 'F') {
+        txt = `Fixed cost is now ${money(F)}. TFC, TC, AFC and ATC move, but TVC, AVC and MC don’t: fixed costs don’t change with output, so they never affect marginal cost.`;
+      } else if (st.last === 'k') {
+        txt = `Variable input prices are at ${Math.round(k * 100)}% of normal. TVC, TC, AVC, ATC and MC all move, but TFC and AFC don’t.`;
+      } else {
+        const rel = (a, name) => Math.abs(vals.MC - a) < 0.15 ? `MC ≈ ${name}, so ${name} is at its minimum` : vals.MC < a ? `MC < ${name}, so ${name} is falling` : `MC > ${name}, so ${name} is rising`;
+        txt = `At ${q} units: ${rel(vals.AVC, 'AVC')}; ${rel(vals.ATC, 'ATC')}. The gap between ATC and AVC is AFC (${money(vals.AFC)}), which shrinks as output grows.`;
+      }
+      note.textContent = txt;
+    }
+    setView();
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     LRAC — economies, constant returns and diseconomies of scale
+     ====================================================================== */
+  function lrac(host) {
+    const cost = q => q < 35 ? 8 + 0.00889 * (35 - q) * (35 - q) : q > 65 ? 8 + 0.00778 * (q - 65) * (q - 65) : 8;
+    const st = { q: 20 };
+    const f = frame('The long-run average cost curve', 'Move the firm along its LRAC. In the long run all inputs can change, so the question is what happens when the firm doubles everything.', 'lab-lrac');
+    const chart = Chart(f.plot, { xMax: 100, yMax: 25, xStep: 20, yStep: 5, xLabel: 'Output', yLabel: 'Long-run average cost', bare: true, left: 24, ratio: 0.6, label: 'Long-run average cost curve' });
+    const sl = slider({ name: 'scale', label: 'Size of the firm (output)', min: 5, max: 95, step: 5, value: st.q, onInput: v => { st.q = v; draw(); } });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(sl.row, dl, note);
+    function draw() {
+      chart.clear();
+      chart.poly([[0, 0], [35, 0], [35, 25], [0, 25]], 'fill-eos');
+      chart.poly([[65, 0], [100, 0], [100, 25], [65, 25]], 'fill-dos');
+      s('line', { x1: chart.X(35), x2: chart.X(35), y1: chart.Y(0), y2: chart.Y(25), class: 'guide' }, chart.layers.lines);
+      s('line', { x1: chart.X(65), x2: chart.X(65), y1: chart.Y(0), y2: chart.Y(25), class: 'guide' }, chart.layers.lines);
+      [[17.5, 'Economies'], [50, 'Constant'], [82.5, 'Diseconomies']].forEach(([x, t]) => chart.text(x, 23.2, t, 'region-label'));
+      [[17.5, 'of scale'], [50, 'returns'], [82.5, 'of scale']].forEach(([x, t]) => chart.text(x, 23.2, t, 'region-label', 'middle', 15));
+      const pts = [];
+      for (let q = 5; q <= 95; q += 0.5) pts.push([q, cost(q)]);
+      chart.path(pts, 'curve lrac');
+      chart.text(95, cost(95), 'LRAC', 'lrac-label', 'end', -10);
+      chart.dot(st.q, cost(st.q), 'point');
+      const q = st.q;
+      const region = q < 35 ? 'eos' : q > 65 ? 'dos' : 'crs';
+      const R = {
+        eos: ['Economies of scale', 'More than doubles', 'Falling', 'k-good', 'The firm is still small enough to gain from growing. More workers and machines allow specialisation, with dedicated teams for each task, so productivity rises and cost per unit falls.'],
+        crs: ['Constant returns to scale', 'Exactly doubles', 'Constant', '', 'Growing no longer changes productivity. Output rises in the same proportion as inputs, so average cost stays the same.'],
+        dos: ['Diseconomies of scale', 'Less than doubles', 'Rising', 'k-hot', 'The firm has become too big. Red tape, slow communication and management problems mean output rises less than inputs, so cost per unit rises.']
+      }[region];
+      readout(dl, [
+        ['Zone', R[0], 'k-wide ' + R[3]],
+        ['If all inputs double, output…', R[1], 'k-wide'],
+        ['Long-run average cost', R[2]]
+      ]);
+      note.textContent = R[4];
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     STRUCTURES — the four market structures and each firm's demand curve
+     ====================================================================== */
+  const STRUCTURES = {
+    pc: {
+      name: 'Perfect competition',
+      rows: [['Number of sellers', 'Very many small firms'], ['Type of product', 'Homogeneous (identical)'], ['Barriers to entry', 'None'], ['Market power', 'None: a price taker'], ['Long-run profit', 'Normal profit only'], ['Examples', 'Farm products; close to it: stock and foreign exchange markets']],
+      power: 0,
+      demand: 'Horizontal (perfectly elastic) at the market price, set by market demand and supply. Raise the price and it loses every customer; there’s no reason to cut it, since it can already sell all it wants.'
+    },
+    mc: {
+      name: 'Monopolistic competition',
+      rows: [['Number of sellers', 'Many relatively small firms'], ['Type of product', 'Differentiated (real or perceived)'], ['Barriers to entry', 'Minimal'], ['Market power', 'Some, from differentiation'], ['Long-run profit', 'Normal profit only'], ['Examples', 'Hair salons, hotels, shampoo and T-shirt shops']],
+      power: 1,
+      demand: 'Downward sloping but fairly elastic, because rivals sell close substitutes. A price rise loses some customers, not all. Advertising and packaging aim to shift this curve right and make it less elastic.'
+    },
+    ol: {
+      name: 'Oligopoly',
+      rows: [['Number of sellers', 'A few large firms'], ['Type of product', 'Homogeneous (oil, copper) or differentiated (cars, bread)'], ['Barriers to entry', 'Strong'], ['Market power', 'Substantial, with mutual interdependence'], ['Long-run profit', 'Normal or economic profit'], ['Examples', 'Bread (Gardenia, Sunshine, Hi-5, Bonjour), cars, oil']],
+      power: 2,
+      demand: 'Kinked at the current price. Above it, demand is elastic because rivals ignore a price rise. Below it, demand is inelastic because rivals match a price cut. So prices tend to stay put.'
+    },
+    mo: {
+      name: 'Monopoly',
+      rows: [['Number of sellers', 'One'], ['Type of product', 'Unique, with no close substitutes'], ['Barriers to entry', 'Very strong'], ['Market power', 'Great: a price maker'], ['Long-run profit', 'Normal or economic profit'], ['Examples', 'Singapore Post']],
+      power: 3,
+      demand: 'The market demand curve itself (D = AR), sloping downward. The more market power, the more inelastic it is.'
+    }
+  };
+  function structures(host) {
+    const st = { k: 'pc' };
+    const f = frame('Market structure explorer', 'Pick a structure to see its characteristics and the demand curve facing one firm.', 'lab-structures');
+    const chart = Chart(f.plot, { xMax: 100, yMax: 20, xStep: 20, yStep: 4, xLabel: 'Quantity (one firm)', yLabel: 'Price', bare: true, left: 30, ratio: 0.7, label: 'Demand curve facing one firm' });
+    const seg = segmented('Market structure', Object.keys(STRUCTURES).map(k => [k, STRUCTURES[k].name]), st.k, v => { st.k = v; draw(); });
+    f.fig.insertBefore(h('div', { class: 'lab-tabs' }, [seg.el]), f.body);
+    const powerBar = h('div', { class: 'power', 'aria-hidden': 'true' });
+    const dl = h('dl', { class: 'readout readout-list' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(h('p', { class: 'panel-label', text: 'Market power' }), powerBar, dl);
+    f.plot.appendChild(note);
+    function draw() {
+      const S = STRUCTURES[st.k];
+      chart.clear();
+      if (st.k === 'pc') {
+        chart.hline(10, 'curve demand', 'D = P = AR = MR');
+        chart.text(0, 10, 'P', 'axis-p', 'end', 4);
+      } else if (st.k === 'mc') {
+        chart.line(16, -0.09, 'curve demand', 'D', 'end');
+      } else if (st.k === 'ol') {
+        s('line', { x1: chart.X(0), y1: chart.Y(12), x2: chart.X(50), y2: chart.Y(10), class: 'curve demand' }, chart.layers.lines);
+        s('line', { x1: chart.X(50), y1: chart.Y(10), x2: chart.X(70), y2: chart.Y(1.5), class: 'curve demand' }, chart.layers.lines);
+        chart.guides(50, 10, 'Q', 'P', 'point');
+        chart.dot(50, 10, 'point');
+        chart.text(24, 12.2, 'Elastic: rivals ignore a price rise', 'kink-note', 'middle', -10);
+        chart.text(61, 6, 'Inelastic: rivals', 'kink-note', 'start', 0);
+        chart.text(61, 6, 'match a price cut', 'kink-note', 'start', 14);
+      } else {
+        chart.line(19, -0.2, 'curve demand', 'D = AR', 'end');
+      }
+      powerBar.innerHTML = ['None', 'Some', 'Substantial', 'Great'].map((t, i) => `<span class="${i <= S.power ? 'on' : ''}">${t}</span>`).join('');
+      readout(dl, S.rows.map(r => [r[0], r[1]]));
+      note.textContent = S.demand;
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
   /* ---------- registry ---------- */
-  const REGISTRY = { market, ppf, advantage, elasticity, inflation, adas };
+  const REGISTRY = {
+    market, ppf, advantage, inflation, adas, shifter, schedule, production, costs, lrac, structures,
+    elasticity: (node, preset) => preset === 'module' ? elasticityModule(node) : elasticity(node)
+  };
 
   window.ECON = window.ECON || {};
   ECON.widgets = {

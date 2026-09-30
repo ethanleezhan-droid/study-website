@@ -1,7 +1,14 @@
-/* Course structure. Lessons register themselves in the unit files (u1.js … u5.js). */
+/* Course structure. The module unit ('m') follows the course notes (module-a.js, module-b.js);
+   the other units are the wider course (u1.js … u5.js). */
 window.ECON = window.ECON || {};
 
 ECON.units = [
+  {
+    id: 'm',
+    module: true,
+    title: 'Microeconomics',
+    blurb: 'Basic concepts, demand, supply, market equilibrium, elasticity, production and costs, and market structure.'
+  },
   {
     id: 'u1',
     title: 'Thinking Like an Economist',

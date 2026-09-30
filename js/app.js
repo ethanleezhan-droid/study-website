@@ -2,12 +2,34 @@
 (function () {
   const units = ECON.units;
   const lessons = ECON.lessons;
-  lessons.forEach((l, i) => { l.n = i + 1; });
+  const unitById = Object.fromEntries(units.map(u => [u.id, u]));
+  let unitN = 0;
+  units.forEach(u => { if (!u.module) u.n = ++unitN; });
+  /* Two tracks: "Your module" (Topics 1–7, following the course notes) and the wider course. */
+  let topicN = 0, lessonN = 0;
+  lessons.forEach(l => {
+    l.module = !!unitById[l.unit].module;
+    if (l.module) { l.n = ++topicN; l.label = 'Topic ' + l.n; }
+    else { l.n = ++lessonN; l.label = 'Lesson ' + l.n; }
+  });
+  const moduleLessons = lessons.filter(l => l.module);
+  const introLessons = lessons.filter(l => !l.module);
+  const moduleUnit = units.find(u => u.module);
   const byId = Object.fromEntries(lessons.map(l => [l.id, l]));
-  const unitById = Object.fromEntries(units.map((u, i) => [u.id, Object.assign(u, { n: i + 1 })]));
-  const glossary = [];
-  lessons.forEach(l => l.terms.forEach(([term, def]) => glossary.push({ term, def, lesson: l, key: l.id + ':' + term })));
-  glossary.sort((a, b) => a.term.localeCompare(b.term, 'en', { sensitivity: 'base' }));
+
+  /* Key terms for a set of lessons, one entry per term (the first lesson to define it wins,
+     so the module's wording is used where both tracks define a term). */
+  function termsFor(ls) {
+    const seen = new Set(), out = [];
+    ls.forEach(l => l.terms.forEach(([term, def]) => {
+      const k = term.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ term, def, lesson: l, key: l.id + ':' + term });
+    }));
+    return out.sort((a, b) => a.term.localeCompare(b.term, 'en', { sensitivity: 'base' }));
+  }
+  const glossary = termsFor(lessons);
 
   const main = document.getElementById('main');
   let cleanup = null;
@@ -15,18 +37,19 @@
 
   /* ---------- progress storage (per browser) ---------- */
   const KEY = 'marginal-notes-v1';
-  const blank = () => ({ done: {}, quiz: {}, cards: {}, exam: null });
+  const blank = () => ({ done: {}, quiz: {}, cards: {}, exams: {} });
   let data = blank();
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) data = Object.assign(blank(), JSON.parse(raw));
   } catch (e) { /* storage unavailable: progress lasts for this visit only */ }
+  if (!data.exams) data.exams = {};
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
     updateHeader();
   }
-  const doneCount = () => lessons.filter(l => data.done[l.id]).length;
-  const nextLesson = () => lessons.find(l => !data.done[l.id]);
+  const doneIn = ls => ls.filter(l => data.done[l.id]).length;
+  const nextLesson = () => moduleLessons.find(l => !data.done[l.id]) || introLessons.find(l => !data.done[l.id]);
 
   /* ---------- helpers ---------- */
   const esc = str => String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
@@ -45,6 +68,7 @@
     return { q: q.q, why: q.why, options: order.map(i => q.options[i]), answer: order.indexOf(q.answer) };
   }
   const LETTERS = 'ABCDEFG';
+  const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
   function statusChip(l) {
     if (data.done[l.id]) return '<span class="status is-done">Complete</span>';
@@ -54,13 +78,13 @@
   }
 
   function updateHeader() {
-    const n = doneCount();
+    const n = doneIn(moduleLessons), total = moduleLessons.length;
     const t = document.getElementById('progress-text');
-    if (t) t.textContent = `${n} of ${lessons.length} lessons`;
+    if (t) t.textContent = `${n} of ${total} topics`;
     const bar = document.getElementById('progress-bar');
-    if (bar) bar.style.width = (n / lessons.length * 100) + '%';
+    if (bar) bar.style.width = (n / total * 100) + '%';
     const meter = document.getElementById('progress-meter');
-    if (meter) meter.setAttribute('aria-valuenow', String(n));
+    if (meter) { meter.setAttribute('aria-valuenow', String(n)); meter.setAttribute('aria-valuemax', String(total)); }
   }
 
   /* ---------- router ---------- */
@@ -93,47 +117,53 @@
   function setTitle(t) { document.title = t ? `${t} · Marginal Notes` : 'Marginal Notes'; }
 
   /* ---------- home ---------- */
+  function lessonRows(ls) {
+    return ls.map(l => `
+          <li><a class="lesson-row${data.done[l.id] ? ' is-done' : ''}" href="#lesson-${l.id}">
+            <span class="ln">${l.n}</span>
+            <span class="lt"><span class="lt-title">${esc(l.title)}</span><span class="lt-sum">${esc(l.summary)}</span></span>
+            <span class="lm">${l.minutes} min</span>
+            ${statusChip(l)}
+          </a></li>`).join('');
+  }
+  function progressLine(ls) {
+    const d = doneIn(ls);
+    return `<p class="unit-prog"><span class="mini-bar" aria-hidden="true"><span style="width:${d / ls.length * 100}%"></span></span>${d} of ${ls.length} complete</p>`;
+  }
+
   function renderHome() {
     setTitle('');
-    const n = doneCount();
+    const nMod = doneIn(moduleLessons);
     const next = nextLesson();
     let primary;
-    if (n === 0) primary = `<a class="btn btn-primary" href="#lesson-${lessons[0].id}">Start Lesson 1</a>`;
-    else if (next) primary = `<a class="btn btn-primary" href="#lesson-${next.id}">Continue: Lesson ${next.n}</a>`;
+    if (nMod === 0) primary = `<a class="btn btn-primary" href="#lesson-${moduleLessons[0].id}">Start Topic 1</a>`;
+    else if (next) primary = `<a class="btn btn-primary" href="#lesson-${next.id}">Continue: ${next.label}</a>`;
     else primary = '<a class="btn btn-primary" href="#exam">Take the practice exam</a>';
 
-    const unitHtml = units.map(u => {
+    const unitHtml = units.filter(u => !u.module).map(u => {
       const ls = lessons.filter(l => l.unit === u.id);
-      const d = ls.filter(l => data.done[l.id]).length;
       return `
       <section class="unit" aria-labelledby="unit-${u.id}">
         <header class="unit-head">
           <p class="unit-num">Unit ${u.n}</p>
           <h3 id="unit-${u.id}">${esc(u.title)}</h3>
           <p class="unit-blurb">${esc(u.blurb)}</p>
-          <p class="unit-prog"><span class="mini-bar" aria-hidden="true"><span style="width:${d / ls.length * 100}%"></span></span>${d} of ${ls.length} complete</p>
+          ${progressLine(ls)}
         </header>
-        <ol class="lesson-list">
-          ${ls.map(l => `
-          <li><a class="lesson-row${data.done[l.id] ? ' is-done' : ''}" href="#lesson-${l.id}">
-            <span class="ln">${l.n}</span>
-            <span class="lt"><span class="lt-title">${esc(l.title)}</span><span class="lt-sum">${esc(l.summary)}</span></span>
-            <span class="lm">${l.minutes} min</span>
-            ${statusChip(l)}
-          </a></li>`).join('')}
-        </ol>
+        <ol class="lesson-list">${lessonRows(ls)}</ol>
       </section>`;
     }).join('');
 
+    const best = data.exams.module;
     main.innerHTML = `
     <div class="wrap">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">An introductory economics course in ${lessons.length} lessons</p>
+          <p class="eyebrow">Your microeconomics module, Topics 1–${moduleLessons.length}</p>
           <h1>Economics is the study of choices made under scarcity.</h1>
-          <p class="lede">Work through micro and macroeconomics at your own pace. Every lesson has graphs you can move, a quiz that explains each answer, and flashcards for the key terms.</p>
+          <p class="lede">Everything in your course notes, taught step by step with the same section numbers and examples. Each topic has graphs you can move, answers for the blanks in your notes, the “Do you know?” questions, and a quiz.</p>
           <div class="actions">${primary}<a class="btn" href="#labs">Open the labs</a></div>
-          <p class="hero-progress">${n === 0 ? 'Your progress is saved in this browser as you go.' : `You’ve completed ${n} of ${lessons.length} lessons.`}</p>
+          <p class="hero-progress">${nMod === 0 ? 'Your progress is saved in this browser as you go.' : `You’ve completed ${nMod} of ${moduleLessons.length} topics.`}</p>
         </div>
         <div class="hero-demo">
           <p class="demo-label">A live market</p>
@@ -143,21 +173,36 @@
     </div>
     <canvas class="guilloche" aria-hidden="true"></canvas>
     <div class="wrap">
-      <section class="course" aria-labelledby="course-h">
+      <section class="course" aria-labelledby="module-h">
         <div class="section-head">
-          <h2 id="course-h">The course</h2>
-          <p>Five units, meant to be taken in order. Each lesson takes 10 to 16 minutes, and you complete it by passing its quiz.</p>
+          <h2 id="module-h">Your module</h2>
+          <p>The seven topics in your notes, in order. Pass each topic’s quiz to complete it.</p>
         </div>
-        ${unitHtml}
+        <section class="unit unit-module" aria-labelledby="unit-m">
+          <header class="unit-head">
+            <p class="unit-num">Topics 1–${moduleLessons.length}</p>
+            <h3 id="unit-m">${esc(moduleUnit.title)}</h3>
+            <p class="unit-blurb">${esc(moduleUnit.blurb)}</p>
+            ${progressLine(moduleLessons)}
+          </header>
+          <ol class="lesson-list">${lessonRows(moduleLessons)}</ol>
+        </section>
       </section>
       <section class="tools" aria-labelledby="tools-h">
         <div class="section-head"><h2 id="tools-h">Study tools</h2></div>
         <div class="tool-grid">
           <a class="tool" href="#labs"><span class="tool-title">Labs</span><span class="tool-desc">Every interactive graph and calculator in one place.</span></a>
-          <a class="tool" href="#flashcards"><span class="tool-title">Flashcards</span><span class="tool-desc">${glossary.length} key terms, with spaced repetition that brings back the ones you miss.</span></a>
-          <a class="tool" href="#glossary"><span class="tool-title">Glossary</span><span class="tool-desc">Search every definition in the course.</span></a>
-          <a class="tool" href="#exam"><span class="tool-title">Practice exam</span><span class="tool-desc">A random mix of quiz questions from across the course.${data.exam ? ` Best score: ${data.exam.best}/${data.exam.total}.` : ''}</span></a>
+          <a class="tool" href="#flashcards"><span class="tool-title">Flashcards</span><span class="tool-desc">${termsFor(moduleLessons).length} key terms from your module, with spaced repetition that brings back the ones you miss.</span></a>
+          <a class="tool" href="#glossary"><span class="tool-title">Glossary</span><span class="tool-desc">Search every definition, with a link to where it’s taught.</span></a>
+          <a class="tool" href="#exam"><span class="tool-title">Practice exam</span><span class="tool-desc">A random mix of questions from all seven topics.${best ? ` Best score: ${best.best}/${best.total}.` : ''}</span></a>
         </div>
+      </section>
+      <section class="course course-wider" aria-labelledby="course-h">
+        <div class="section-head">
+          <h2 id="course-h">Go further</h2>
+          <p>A wider course of ${introLessons.length} lessons. Units 1–3 revisit your module’s topics from a different angle and add consumer surplus, taxes, game theory and market failure. Units 4–5 cover macroeconomics, which isn’t in Topics 1–7.</p>
+        </div>
+        ${unitHtml}
       </section>
     </div>`;
     const canvas = main.querySelector('.guilloche');
@@ -200,35 +245,43 @@
 
   /* ---------- lesson ---------- */
   function syllabusHtml(current) {
-    return units.map(u => `
-      <p class="syl-unit">Unit ${u.n}: ${esc(u.title)}</p>
+    const block = (title, ls) => `
+      <p class="syl-unit">${esc(title)}</p>
       <ol class="syl-list">
-        ${lessons.filter(l => l.unit === u.id).map(l => `
+        ${ls.map(l => `
         <li><a class="syl-link${l.id === current.id ? ' is-current' : ''}${data.done[l.id] ? ' is-done' : ''}" href="#lesson-${l.id}"${l.id === current.id ? ' aria-current="page"' : ''}>
           <span class="syl-n">${data.done[l.id] ? '<span class="tick" aria-label="complete">✓</span>' : l.n}</span><span>${esc(l.title)}</span>
         </a></li>`).join('')}
-      </ol>`).join('');
+      </ol>`;
+    let html = block('Your module: Topics 1–' + moduleLessons.length, moduleLessons);
+    html += '<p class="syl-track">Go further</p>';
+    html += units.filter(u => !u.module).map(u => block(`Unit ${u.n}: ${u.title}`, lessons.filter(l => l.unit === u.id))).join('');
+    return html;
   }
 
   function renderLesson(l) {
     setTitle(l.title);
     const u = unitById[l.unit];
-    const prev = lessons[l.n - 2], next = lessons[l.n];
+    const track = l.module ? moduleLessons : introLessons;
+    const idx = track.indexOf(l);
+    const prev = track[idx - 1], next = track[idx + 1];
+    const eyebrow = l.module ? `Your module · Topic ${l.n} of ${moduleLessons.length}` : `Unit ${u.n} · Lesson ${l.n} of ${introLessons.length}`;
     main.innerHTML = `
     <div class="wrap lesson-layout">
       <aside class="syllabus" aria-label="Course contents">${syllabusHtml(l)}</aside>
       <article class="lesson">
         <details class="syllabus-mobile">
-          <summary>All lessons</summary>
+          <summary>All topics and lessons</summary>
           ${syllabusHtml(l)}
         </details>
         <header class="lesson-head">
-          <p class="eyebrow">Unit ${u.n} · Lesson ${l.n} of ${lessons.length}</p>
+          <p class="eyebrow">${eyebrow}</p>
           <h1>${esc(l.title)}</h1>
           <p class="lede">${esc(l.summary)}</p>
-          <div class="meta"><span>${l.minutes} min read</span><span id="lesson-status">${statusChip(l)}</span>
+          <div class="meta"><span>${l.minutes} min read</span>${l.module ? `<span class="from-notes">Matches Topic ${l.n} in your notes</span>` : ''}<span id="lesson-status">${statusChip(l)}</span>
             <button type="button" class="btn btn-quiet btn-small" id="mark-done"></button></div>
         </header>
+        <nav class="toc" id="toc" aria-label="On this page" hidden></nav>
         <div class="prose">${l.body}</div>
         <section class="terms" aria-labelledby="terms-h">
           <div class="terms-head">
@@ -239,11 +292,13 @@
             ${l.terms.map(([t, d]) => `<div><dt>${esc(t)}</dt><dd>${esc(d)}</dd></div>`).join('')}
           </dl>
         </section>
+        ${l.blanks ? blanksHtml(l) : ''}
+        ${l.review ? reviewHtml(l) : ''}
         <div id="quiz-host"></div>
         <nav class="pager" aria-label="Lesson navigation">
-          ${prev ? `<a class="pager-link" href="#lesson-${prev.id}"><span class="pager-dir">← Previous</span><span class="pager-title">${prev.n}. ${esc(prev.title)}</span></a>` : '<span></span>'}
-          ${next ? `<a class="pager-link next" href="#lesson-${next.id}"><span class="pager-dir">Next →</span><span class="pager-title">${next.n}. ${esc(next.title)}</span></a>`
-                 : '<a class="pager-link next" href="#exam"><span class="pager-dir">Finished the course?</span><span class="pager-title">Take the practice exam</span></a>'}
+          ${prev ? `<a class="pager-link" href="#lesson-${prev.id}"><span class="pager-dir">← Previous</span><span class="pager-title">${prev.label}: ${esc(prev.title)}</span></a>` : '<span></span>'}
+          ${next ? `<a class="pager-link next" href="#lesson-${next.id}"><span class="pager-dir">Next →</span><span class="pager-title">${next.label}: ${esc(next.title)}</span></a>`
+                 : `<a class="pager-link next" href="#exam"><span class="pager-dir">${l.module ? 'Finished the module?' : 'Finished the course?'}</span><span class="pager-title">Take the practice exam</span></a>`}
         </nav>
       </article>
     </div>`;
@@ -259,8 +314,91 @@
       save(); refreshStatus();
     });
     refreshStatus();
-
+    wireReview();
+    wireBlanks();
     lessonQuiz(main.querySelector('#quiz-host'), l, next, refreshStatus);
+    buildToc();
+  }
+
+  function blanksHtml(l) {
+    return `
+        <section class="blanks" aria-labelledby="blanks-h">
+          <div class="terms-head">
+            <h2 id="blanks-h">Fill in your notes</h2>
+            <div class="check"><input type="checkbox" id="blanks-hide"><label for="blanks-hide">Hide answers to test yourself</label></div>
+          </div>
+          <p class="section-lede">Model answers for the blanks (*) in your Topic ${l.n} notes, in order. Your lecturer’s wording may differ a little; what matters is the idea.</p>
+          <div class="table-wrap"><table class="blanks-table">
+            <thead><tr><th>Section</th><th>In your notes</th><th>Answer</th></tr></thead>
+            <tbody>${l.blanks.map(([sec, prompt, ans]) => `<tr><td class="b-sec">${sec}</td><td class="b-prompt">${prompt}</td><td class="b-ans" tabindex="-1">${ans}</td></tr>`).join('')}</tbody>
+          </table></div>
+        </section>`;
+  }
+  function wireBlanks() {
+    const box = main.querySelector('#blanks-hide');
+    if (!box) return;
+    const sec = main.querySelector('.blanks');
+    box.addEventListener('change', () => {
+      sec.classList.toggle('is-hidden', box.checked);
+      sec.querySelectorAll('.b-ans').forEach(td => {
+        td.classList.remove('is-revealed');
+        if (box.checked) { td.tabIndex = 0; td.setAttribute('role', 'button'); td.setAttribute('aria-label', 'Hidden answer. Press to reveal.'); }
+        else { td.tabIndex = -1; td.removeAttribute('role'); td.removeAttribute('aria-label'); }
+      });
+    });
+    sec.querySelectorAll('.b-ans').forEach(td => {
+      const reveal = () => {
+        if (!sec.classList.contains('is-hidden')) return;
+        td.classList.add('is-revealed');
+        td.removeAttribute('aria-label');
+        td.removeAttribute('role');
+      };
+      td.addEventListener('click', reveal);
+      td.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reveal(); } });
+    });
+  }
+
+  function reviewHtml(l) {
+    return `
+        <section class="review" aria-labelledby="review-h">
+          <div class="terms-head">
+            <h2 id="review-h">Do you know?</h2>
+            <button type="button" class="btn btn-small" id="review-all">Show all answers</button>
+          </div>
+          <p class="section-lede">The revision questions from the end of your Topic ${l.n} notes. Answer each one in your head or on paper first, then open it to check.</p>
+          <div class="review-list">
+            ${l.review.map(([q, a], i) => `<details class="rv"><summary><span class="rv-n">${i + 1}</span><span class="rv-q">${esc(q)}</span></summary><div class="rv-a">${a}</div></details>`).join('')}
+          </div>
+        </section>`;
+  }
+  function wireReview() {
+    const btn = main.querySelector('#review-all');
+    if (!btn) return;
+    const items = [...main.querySelectorAll('.rv')];
+    const sync = () => { btn.textContent = items.every(d => d.open) ? 'Hide all answers' : 'Show all answers'; };
+    btn.addEventListener('click', () => {
+      const open = !items.every(d => d.open);
+      items.forEach(d => { d.open = open; });
+      sync();
+    });
+    items.forEach(d => d.addEventListener('toggle', sync));
+  }
+
+  /* "On this page" jump list, built from the lesson's section headings. */
+  function buildToc() {
+    const toc = main.querySelector('#toc');
+    const heads = [...main.querySelectorAll('.prose > h2, .lesson > section > .terms-head > h2, .lesson > section > h2, #quiz-host h2')];
+    if (heads.length < 5) return;
+    heads.forEach((hd, i) => { if (!hd.id) hd.id = 'sec-' + i; });
+    toc.innerHTML = `<p class="toc-label">On this page</p><div class="chips">${heads.map(hd => `<button type="button" class="chip" data-target="${hd.id}">${esc(hd.textContent)}</button>`).join('')}</div>`;
+    toc.hidden = false;
+    toc.querySelectorAll('[data-target]').forEach(b => b.addEventListener('click', () => {
+      const t = document.getElementById(b.dataset.target);
+      if (!t) return;
+      t.scrollIntoView({ behavior: smooth(), block: 'start' });
+      t.setAttribute('tabindex', '-1');
+      t.focus({ preventScroll: true });
+    }));
   }
 
   function lessonQuiz(host, l, next, onChange) {
@@ -271,7 +409,7 @@
       <section class="quiz" aria-labelledby="quiz-h">
         <div class="quiz-head">
           <h2 id="quiz-h">Check your understanding</h2>
-          <p>${total} questions. Get ${need} right to complete the lesson. Each answer is explained once you choose.</p>
+          <p>${total} questions. Get ${need} right to complete the ${l.module ? 'topic' : 'lesson'}. Each answer is explained once you choose.</p>
         </div>
         <ol class="q-list">${quiz.map((q, i) => questionHtml(q, i)).join('')}</ol>
         <div class="quiz-result" aria-live="polite"></div>
@@ -297,9 +435,10 @@
       save(); onChange();
       const res = host.querySelector('.quiz-result');
       res.className = 'quiz-result ' + (passed ? 'is-pass' : 'is-retry');
+      const unit = l.module ? 'topic' : 'lesson';
       res.innerHTML = `
         <p class="score"><strong>${correct}</strong> of ${total} correct</p>
-        <p>${passed ? 'Lesson complete. Nice work.' : `You need ${need} to complete the lesson. Review the sections behind the questions you missed, then try again.`}</p>
+        <p>${passed ? `${unit[0].toUpperCase() + unit.slice(1)} complete. Nice work.` : `You need ${need} to complete the ${unit}. Review the sections behind the questions you missed, then try again.`}</p>
         <div class="actions">
           <button type="button" class="btn${passed ? '' : ' btn-primary'}" data-act="retry">Try the quiz again</button>
           ${passed && next ? `<a class="btn btn-primary" href="#lesson-${next.id}">Next: ${esc(next.title)}</a>` : ''}
@@ -344,46 +483,66 @@
 
   /* ---------- labs ---------- */
   const LABS = [
-    { id: 'market', title: 'Supply and demand', lesson: 'equilibrium', html: '<div data-widget="market" data-preset="full"></div>' },
-    { id: 'ppf', title: 'Production possibilities', lesson: 'ppf', html: '<div data-widget="ppf"></div>' },
-    { id: 'advantage', title: 'Comparative advantage', lesson: 'trade', html: '<div data-widget="advantage"></div>' },
-    { id: 'elasticity', title: 'Elasticity', lesson: 'elasticity', html: '<div data-widget="elasticity"></div>' },
-    { id: 'inflation', title: 'Inflation', lesson: 'inflation', html: '<div data-widget="inflation"></div>' },
-    { id: 'adas', title: 'AD-AS model', lesson: 'ad-as', html: '<div data-widget="adas" data-preset="adas"></div>' },
-    { id: 'monetary', title: 'Monetary policy', lesson: 'monetary-policy', html: '<div data-widget="adas" data-preset="monetary"></div>' },
-    { id: 'fiscal', title: 'Fiscal policy', lesson: 'fiscal-policy', html: '<div data-widget="adas" data-preset="fiscal"></div>' }
+    { group: 'module', id: 'ppc', title: 'PPC', lesson: 'm-basic', html: '<div data-widget="ppf" data-preset="laptops"></div>' },
+    { group: 'module', id: 'demand', title: 'Demand shifts', lesson: 'm-demand', html: '<div data-widget="shifter" data-preset="demand"></div>' },
+    { group: 'module', id: 'supply', title: 'Supply shifts', lesson: 'm-supply', html: '<div data-widget="shifter" data-preset="supply"></div>' },
+    { group: 'module', id: 'chocolate', title: 'Chocolate bar market', lesson: 'm-equilibrium', html: '<div data-widget="schedule"></div>' },
+    { group: 'module', id: 'controls', title: 'Ceilings and floors', lesson: 'm-equilibrium', html: '<div data-widget="market" data-preset="controls-basic"></div>' },
+    { group: 'module', id: 'both', title: 'Both curves shift', lesson: 'm-equilibrium', html: '<div data-widget="market" data-preset="shifts"></div>' },
+    { group: 'module', id: 'elasticity-m', title: 'Elasticity', lesson: 'm-elasticity', html: '<div data-widget="elasticity" data-preset="module"></div>' },
+    { group: 'module', id: 'production', title: 'TP, MP and AP', lesson: 'm-costs', html: '<div data-widget="production"></div>' },
+    { group: 'module', id: 'costs', title: 'Cost curves', lesson: 'm-costs', html: '<div data-widget="costs"></div>' },
+    { group: 'module', id: 'lrac', title: 'LRAC', lesson: 'm-costs', html: '<div data-widget="lrac"></div>' },
+    { group: 'module', id: 'structures', title: 'Market structures', lesson: 'm-structures', html: '<div data-widget="structures"></div>' },
+    { group: 'wider', id: 'market', title: 'Full market lab', lesson: 'equilibrium', html: '<div data-widget="market" data-preset="full"></div>' },
+    { group: 'wider', id: 'advantage', title: 'Comparative advantage', lesson: 'trade', html: '<div data-widget="advantage"></div>' },
+    { group: 'wider', id: 'inflation', title: 'Inflation', lesson: 'inflation', html: '<div data-widget="inflation"></div>' },
+    { group: 'wider', id: 'adas', title: 'AD-AS model', lesson: 'ad-as', html: '<div data-widget="adas" data-preset="adas"></div>' },
+    { group: 'wider', id: 'monetary', title: 'Monetary policy', lesson: 'monetary-policy', html: '<div data-widget="adas" data-preset="monetary"></div>' },
+    { group: 'wider', id: 'fiscal', title: 'Fiscal policy', lesson: 'fiscal-policy', html: '<div data-widget="adas" data-preset="fiscal"></div>' }
   ];
   function renderLabs() {
     setTitle('Labs');
+    const section = x => `
+      <section class="lab-section" id="lab-${x.id}" aria-label="${esc(x.title)}">
+        <p class="lab-from">From <a href="#lesson-${x.lesson}">${byId[x.lesson].label}: ${esc(byId[x.lesson].title)}</a></p>
+        ${x.html}
+      </section>`;
+    const jump = g => `<div class="chips">${LABS.filter(x => x.group === g).map(x => `<button type="button" class="chip" data-jump="lab-${x.id}">${esc(x.title)}</button>`).join('')}</div>`;
     main.innerHTML = `
     <div class="wrap page">
       <header class="page-head">
         <p class="eyebrow">Study tools</p>
         <h1>Labs</h1>
-        <p class="lede">Every interactive model in the course. Change one thing at a time and predict what will happen before you look.</p>
-        <nav class="chips jump" aria-label="Jump to a lab">
-          ${LABS.map(x => `<button type="button" class="chip" data-jump="lab-${x.id}">${esc(x.title)}</button>`).join('')}
+        <p class="lede">Every interactive model in one place. Change one thing at a time and predict what will happen before you look.</p>
+        <nav class="jump" aria-label="Jump to a lab">
+          <p class="toc-label">Your module</p>${jump('module')}
+          <p class="toc-label">Go further</p>${jump('wider')}
         </nav>
       </header>
-      ${LABS.map(x => `
-      <section class="lab-section" id="lab-${x.id}" aria-label="${esc(x.title)}">
-        <p class="lab-from">From <a href="#lesson-${x.lesson}">Lesson ${byId[x.lesson].n}: ${esc(byId[x.lesson].title)}</a></p>
-        ${x.html}
-      </section>`).join('')}
+      <h2 class="group-title">Your module</h2>
+      ${LABS.filter(x => x.group === 'module').map(section).join('')}
+      <h2 class="group-title">Go further</h2>
+      ${LABS.filter(x => x.group === 'wider').map(section).join('')}
     </div>`;
     main.querySelectorAll('[data-jump]').forEach(b => b.addEventListener('click', () => {
       const t = document.getElementById(b.dataset.jump);
-      if (t) t.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+      if (t) t.scrollIntoView({ behavior: smooth(), block: 'start' });
     }));
   }
 
   /* ---------- flashcards ---------- */
   function renderFlashcards(scope) {
     setTitle('Flashcards');
-    const deckOptions = [['', `All terms (${glossary.length})`]]
-      .concat(units.map(u => [u.id, `Unit ${u.n}: ${u.title}`]))
-      .concat(lessons.map(l => [l.id, `Lesson ${l.n}: ${l.title}`]));
-    if (!deckOptions.some(o => o[0] === scope)) scope = '';
+    const moduleTerms = termsFor(moduleLessons);
+    const groups = [
+      ['Your module', [['module', `All ${moduleLessons.length} topics (${moduleTerms.length} terms)`]].concat(moduleLessons.map(l => [l.id, `${l.label}: ${l.title}`]))],
+      ['Go further', [['all', `Everything (${glossary.length} terms)`]]
+        .concat(units.filter(u => !u.module).map(u => [u.id, `Unit ${u.n}: ${u.title}`]))
+        .concat(introLessons.map(l => [l.id, `${l.label}: ${l.title}`]))]
+    ];
+    const valid = groups.flatMap(g => g[1].map(o => o[0]));
+    if (!valid.includes(scope)) scope = 'module';
     const st = { scope, reverse: false, queue: [], i: 0, flipped: false, seen: 0, missed: new Set() };
 
     main.innerHTML = `
@@ -396,7 +555,7 @@
       <div class="fc-controls">
         <div class="field">
           <label for="fc-deck">Deck</label>
-          <select id="fc-deck">${deckOptions.map(([v, t]) => `<option value="${v}"${v === scope ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>
+          <select id="fc-deck">${groups.map(([label, opts]) => `<optgroup label="${esc(label)}">${opts.map(([v, t]) => `<option value="${v}"${v === scope ? ' selected' : ''}>${esc(t)}</option>`).join('')}</optgroup>`).join('')}</select>
         </div>
         <div class="check"><input type="checkbox" id="fc-reverse"><label for="fc-reverse">Show the definition first</label></div>
       </div>
@@ -407,15 +566,20 @@
 
     const stage = main.querySelector('#fc-stage');
     const stats = main.querySelector('#fc-stats');
-    const deck = () => glossary.filter(g => !st.scope || g.lesson.id === st.scope || g.lesson.unit === st.scope);
+    const deck = () => {
+      if (st.scope === 'module') return moduleTerms;
+      if (st.scope === 'all') return glossary;
+      if (unitById[st.scope]) return termsFor(lessons.filter(l => l.unit === st.scope));
+      return termsFor([byId[st.scope]]);
+    };
     const box = g => data.cards[g.key] || 0;
 
     function start(onlyMissed) {
       let cards = deck();
       if (onlyMissed) cards = cards.filter(g => st.missed.has(g.key));
-      const groups = {};
-      cards.forEach(g => { (groups[box(g)] = groups[box(g)] || []).push(g); });
-      st.queue = Object.keys(groups).map(Number).sort((a, b) => a - b).flatMap(b => shuffle(groups[b]));
+      const buckets = {};
+      cards.forEach(g => { (buckets[box(g)] = buckets[box(g)] || []).push(g); });
+      st.queue = Object.keys(buckets).map(Number).sort((a, b) => a - b).flatMap(b => shuffle(buckets[b]));
       st.i = 0; st.flipped = false; st.seen = 0; st.missed = new Set();
       draw();
     }
@@ -450,7 +614,7 @@
         <p class="fc-count">Card ${st.i + 1} of ${st.queue.length}</p>
         <button type="button" class="fc-card${st.flipped ? ' is-flipped' : ''}" id="fc-card" aria-live="polite">
           <span class="fc-face fc-front">${front}<span class="fc-hint">Tap to flip</span></span>
-          <span class="fc-face fc-back">${back}<span class="fc-src">Lesson ${g.lesson.n}: ${esc(g.lesson.title)}</span></span>
+          <span class="fc-face fc-back">${back}<span class="fc-src">${g.lesson.label}: ${esc(g.lesson.title)}</span></span>
         </button>
         <div class="fc-actions">
           <button type="button" class="btn" data-act="miss" ${st.flipped ? '' : 'disabled'}>Again</button>
@@ -510,11 +674,12 @@
       <header class="page-head">
         <p class="eyebrow">Study tools</p>
         <h1>Glossary</h1>
-        <p class="lede">Every key term in the course, with a link to the lesson that explains it.</p>
+        <p class="lede">Every key term, with a link to the topic or lesson that explains it. Where your module defines a term, its wording is used.</p>
       </header>
       <div class="gl-search">
         <label for="gl-q">Search terms and definitions</label>
-        <input type="search" id="gl-q" placeholder="Try “elasticity” or “surplus”" autocomplete="off">
+        <input type="search" id="gl-q" placeholder="Try “elasticity” or “marginal”" autocomplete="off">
+        <div class="check"><input type="checkbox" id="gl-module"><label for="gl-module">Only terms from your module</label></div>
         <p class="gl-count" id="gl-count" aria-live="polite"></p>
       </div>
       <nav class="gl-letters" id="gl-letters" aria-label="Jump to letter"></nav>
@@ -524,53 +689,65 @@
     const count = main.querySelector('#gl-count');
     const letters = main.querySelector('#gl-letters');
     const input = main.querySelector('#gl-q');
+    const onlyModule = main.querySelector('#gl-module');
     function draw() {
       const q = input.value.trim().toLowerCase();
-      const items = glossary.filter(g => !q || g.term.toLowerCase().includes(q) || g.def.toLowerCase().includes(q));
-      count.textContent = q ? `${items.length} of ${glossary.length} terms match` : `${glossary.length} terms`;
-      const groups = {};
-      items.forEach(g => { const L = g.term[0].toUpperCase(); (groups[L] = groups[L] || []).push(g); });
-      const keys = Object.keys(groups).sort();
+      const base = onlyModule.checked ? glossary.filter(g => g.lesson.module) : glossary;
+      const items = base.filter(g => !q || g.term.toLowerCase().includes(q) || g.def.toLowerCase().includes(q));
+      count.textContent = q ? `${items.length} of ${base.length} terms match` : `${base.length} terms`;
+      const buckets = {};
+      items.forEach(g => { const L = g.term[0].toUpperCase(); (buckets[L] = buckets[L] || []).push(g); });
+      const keys = Object.keys(buckets).sort();
       letters.innerHTML = keys.map(L => `<button type="button" data-letter="${L}">${L}</button>`).join('');
       list.innerHTML = keys.length ? keys.map(L => `
         <section class="gl-group" id="gl-${L}" aria-labelledby="gl-h-${L}">
           <h2 id="gl-h-${L}">${L}</h2>
-          <dl>${groups[L].map(g => `<div class="gl-item"><dt>${esc(g.term)}</dt><dd>${esc(g.def)} <a href="#lesson-${g.lesson.id}">Lesson ${g.lesson.n}</a></dd></div>`).join('')}</dl>
+          <dl>${buckets[L].map(g => `<div class="gl-item"><dt>${esc(g.term)}</dt><dd>${esc(g.def)} <a href="#lesson-${g.lesson.id}">${g.lesson.label}</a></dd></div>`).join('')}</dl>
         </section>`).join('') : '<p class="empty">No terms match. Try a shorter word.</p>';
       letters.querySelectorAll('[data-letter]').forEach(b => b.addEventListener('click', () => {
         document.getElementById('gl-' + b.dataset.letter).scrollIntoView({ block: 'start' });
       }));
     }
     input.addEventListener('input', draw);
+    onlyModule.addEventListener('change', draw);
     draw();
   }
 
   /* ---------- practice exam ---------- */
   function renderExam() {
     setTitle('Practice exam');
-    const pool = lessons.flatMap(l => l.quiz.map(q => ({ q, l })));
-    const donePool = () => pool.filter(x => data.done[x.l.id]);
-    const st = { scope: 'all', size: 10 };
+    const toPool = ls => ls.flatMap(l => l.quiz.map(q => ({ q, l })));
+    const pools = {
+      module: () => toPool(moduleLessons),
+      all: () => toPool(lessons),
+      done: () => toPool(lessons.filter(l => data.done[l.id]))
+    };
+    const st = { scope: 'module', size: 10 };
     main.innerHTML = `
     <div class="wrap page page-narrow">
       <header class="page-head">
         <p class="eyebrow">Study tools</p>
         <h1>Practice exam</h1>
-        <p class="lede">A random set of questions from the lesson quizzes. You see the answers only after you submit, as in a real exam.</p>
+        <p class="lede">A random set of questions from the quizzes. You see the answers only after you submit, as in a real exam.</p>
       </header>
       <div id="exam-stage"></div>
     </div>`;
     const stage = main.querySelector('#exam-stage');
+    const bestLine = () => {
+      const b = data.exams[st.scope];
+      return b ? `Your best so far: ${b.best} of ${b.total} (${Math.round(b.best / b.total * 100)}%).` : '';
+    };
 
     function setup() {
-      const nDone = donePool().length;
-      if (nDone < 5 && st.scope === 'done') st.scope = 'all';
+      const nDone = pools.done().length;
+      if (nDone < 5 && st.scope === 'done') st.scope = 'module';
       stage.innerHTML = `
         <div class="exam-setup">
           <fieldset>
             <legend>Questions from</legend>
-            <div class="radio"><input type="radio" name="scope" id="sc-all" value="all"${st.scope === 'all' ? ' checked' : ''}><label for="sc-all">All ${lessons.length} lessons (${pool.length} questions)</label></div>
-            <div class="radio"><input type="radio" name="scope" id="sc-done" value="done"${st.scope === 'done' ? ' checked' : ''}${nDone < 5 ? ' disabled' : ''}><label for="sc-done">Only lessons I’ve completed${nDone < 5 ? ' (complete a couple of lessons first)' : ` (${nDone} questions)`}</label></div>
+            <div class="radio"><input type="radio" name="scope" id="sc-module" value="module"${st.scope === 'module' ? ' checked' : ''}><label for="sc-module">Your module, Topics 1–${moduleLessons.length} (${pools.module().length} questions)</label></div>
+            <div class="radio"><input type="radio" name="scope" id="sc-all" value="all"${st.scope === 'all' ? ' checked' : ''}><label for="sc-all">Everything: your module and the wider course (${pools.all().length} questions)</label></div>
+            <div class="radio"><input type="radio" name="scope" id="sc-done" value="done"${st.scope === 'done' ? ' checked' : ''}${nDone < 5 ? ' disabled' : ''}><label for="sc-done">Only what I’ve completed${nDone < 5 ? ' (complete a topic first)' : ` (${nDone} questions)`}</label></div>
           </fieldset>
           <fieldset>
             <legend>Length</legend>
@@ -578,20 +755,21 @@
             <div class="radio"><input type="radio" name="size" id="sz-20" value="20"${st.size === 20 ? ' checked' : ''}><label for="sz-20">20 questions</label></div>
           </fieldset>
           <button type="button" class="btn btn-primary" id="exam-start">Start exam</button>
-          ${data.exam ? `<p class="exam-best">Your best so far: ${data.exam.best} of ${data.exam.total} (${Math.round(data.exam.best / data.exam.total * 100)}%).</p>` : ''}
+          <p class="exam-best" id="exam-best">${bestLine()}</p>
         </div>`;
-      stage.querySelectorAll('input[name="scope"]').forEach(r => r.addEventListener('change', () => { st.scope = r.value; }));
+      const best = stage.querySelector('#exam-best');
+      stage.querySelectorAll('input[name="scope"]').forEach(r => r.addEventListener('change', () => { st.scope = r.value; best.textContent = bestLine(); }));
       stage.querySelectorAll('input[name="size"]').forEach(r => r.addEventListener('change', () => { st.size = Number(r.value); }));
       stage.querySelector('#exam-start').addEventListener('click', run);
     }
 
     function run() {
-      const src = st.scope === 'done' ? donePool() : pool;
+      const src = pools[st.scope]();
       const qs = shuffle(src).slice(0, Math.min(st.size, src.length)).map(x => ({ q: prepare(x.q), l: x.l }));
       const picks = new Array(qs.length).fill(null);
       stage.innerHTML = `
         <form class="exam" novalidate>
-          <ol class="q-list">${qs.map((x, i) => questionHtml(x.q, i, `<p class="q-from">Lesson ${x.l.n}: ${esc(x.l.title)}</p>`)).join('')}</ol>
+          <ol class="q-list">${qs.map((x, i) => questionHtml(x.q, i, `<p class="q-from">${x.l.label}: ${esc(x.l.title)}</p>`)).join('')}</ol>
           <div class="exam-bar">
             <p id="exam-count" aria-live="polite">0 of ${qs.length} answered</p>
             <button type="submit" class="btn btn-primary">Submit answers</button>
@@ -627,17 +805,17 @@
       stage.querySelectorAll('.q').forEach((li, i) => {
         const { q, l } = qs[i];
         if (picks[i] === q.answer) score++;
-        revealQuestion(li, q, picks[i], picks[i] === q.answer ? '' : `<p class="fb-link"><a href="#lesson-${l.id}">Review Lesson ${l.n}: ${esc(l.title)}</a></p>`);
+        revealQuestion(li, q, picks[i], picks[i] === q.answer ? '' : `<p class="fb-link"><a href="#lesson-${l.id}">Review ${l.label}: ${esc(l.title)}</a></p>`);
         li.querySelectorAll('.opt').forEach(o => o.classList.remove('is-picked'));
       });
-      const prevBest = data.exam ? data.exam.best / data.exam.total : -1;
-      if (score / qs.length > prevBest) { data.exam = { best: score, total: qs.length }; save(); }
+      const prevBest = data.exams[st.scope] ? data.exams[st.scope].best / data.exams[st.scope].total : -1;
+      if (score / qs.length > prevBest) { data.exams[st.scope] = { best: score, total: qs.length }; save(); }
       const pctScore = Math.round(score / qs.length * 100);
       const bar = stage.querySelector('.exam-bar');
       bar.outerHTML = `
         <div class="quiz-result ${pctScore >= 75 ? 'is-pass' : 'is-retry'}">
           <p class="score"><strong>${score}</strong> of ${qs.length} correct (${pctScore}%)</p>
-          <p>${pctScore >= 90 ? 'Excellent. You clearly know this material.' : pctScore >= 75 ? 'Solid work. Review the questions you missed below.' : 'Keep going. Each missed question links to the lesson that covers it.'}</p>
+          <p>${pctScore >= 90 ? 'Excellent. You clearly know this material.' : pctScore >= 75 ? 'Solid work. Review the questions you missed below.' : 'Keep going. Each missed question links to the topic or lesson that covers it.'}</p>
           <div class="actions"><button type="button" class="btn btn-primary" data-act="new">New exam</button></div>
         </div>`;
       stage.querySelector('.exam-msg').textContent = '';

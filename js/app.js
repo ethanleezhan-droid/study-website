@@ -5,7 +5,7 @@
   const unitById = Object.fromEntries(units.map(u => [u.id, u]));
   let unitN = 0;
   units.forEach(u => { if (!u.module) u.n = ++unitN; });
-  /* Two tracks: "Your module" (Topics 1–7, following the course notes) and the wider course. */
+  /* Two tracks: "Your module" (Topics 1–13, following the course notes) and the wider course. */
   let topicN = 0, lessonN = 0;
   lessons.forEach(l => {
     l.module = !!unitById[l.unit].module;
@@ -14,14 +14,18 @@
   });
   const moduleLessons = lessons.filter(l => l.module);
   const introLessons = lessons.filter(l => !l.module);
-  const moduleUnit = units.find(u => u.module);
+  const moduleUnits = units.filter(u => u.module);
   const byId = Object.fromEntries(lessons.map(l => [l.id, l]));
+  const lessonsIn = u => lessons.filter(l => l.unit === u.id);
+  const topicRange = ls => ls.length === 1 ? `Topic ${ls[0].n}` : `Topics ${ls[0].n}–${ls[ls.length - 1].n}`;
+  const moduleRange = topicRange(moduleLessons);
 
-  /* Key terms for a set of lessons, one entry per term (the first lesson to define it wins,
-     so the module's wording is used where both tracks define a term). */
+  /* Key terms for a set of lessons, one entry per term. Module lessons are ranked first, so the
+     module's wording wins wherever both tracks define a term, whatever order the scripts load in. */
   function termsFor(ls) {
     const seen = new Set(), out = [];
-    ls.forEach(l => l.terms.forEach(([term, def]) => {
+    const ranked = ls.filter(l => l.module).concat(ls.filter(l => !l.module));
+    ranked.forEach(l => l.terms.forEach(([term, def]) => {
       const k = term.toLowerCase();
       if (seen.has(k)) return;
       seen.add(k);
@@ -34,6 +38,7 @@
   const main = document.getElementById('main');
   let cleanup = null;
   let firstRender = true;
+  let pendingTarget = null; // {lessonId, kind: 'heading'|'section', index|id} to scroll to after render
 
   /* ---------- progress storage (per browser) ---------- */
   const KEY = 'marginal-notes-v1';
@@ -60,11 +65,18 @@
   };
   const passMark = n => Math.ceil(n * 0.75);
   /* Shuffle answer options each time a question is shown, so the right answer isn't always
-     in the same spot. Lists that are all numbers stay in their natural order. */
-  const isNumeric = o => /^[−\-+$]*[\d.,]+\s*(%|years?)?$/.test(o.trim());
+     in the same spot. Lists that are all numbers are sorted smallest to largest instead. */
+  const isNumeric = o => /^[−\-+]?\$?[\d.,]+\s*(%|years?|[bm])?$/.test(o.trim());
+  const numValue = o => {
+    const neg = /^[−\-]/.test(o.trim());
+    const v = parseFloat(o.replace(/[^\d.]/g, ''));
+    return neg ? -v : v;
+  };
   function prepare(q) {
-    if (q.options.every(isNumeric)) return q;
-    const order = shuffle(q.options.map((_, i) => i));
+    const idx = q.options.map((_, i) => i);
+    const order = q.options.every(isNumeric)
+      ? idx.sort((a, b) => numValue(q.options[a]) - numValue(q.options[b]))
+      : shuffle(idx);
     return { q: q.q, why: q.why, options: order.map(i => q.options[i]), answer: order.indexOf(q.answer) };
   }
   const LETTERS = 'ABCDEFG';
@@ -106,12 +118,43 @@
     });
     ECON.widgets.mountAll(main);
     updateHeader();
-    if (!firstRender) {
+    if (!firstRender && !(pendingTarget && view === 'lesson')) {
       window.scrollTo(0, 0);
       const h1 = main.querySelector('h1');
       if (h1) { h1.setAttribute('tabindex', '-1'); h1.focus({ preventScroll: true }); }
     }
     firstRender = false;
+    if (pendingTarget && view === 'lesson') { scrollToTarget(pendingTarget); pendingTarget = null; }
+  }
+
+  /* Scroll to a part of a lesson and flash it: a top-level heading in the lesson text
+     (by position), one key term, blank or review question (by position), or a whole
+     section such as the quiz. */
+  function scrollToTarget(t) {
+    let el = null;
+    if (t.kind === 'heading') el = main.querySelectorAll('.prose > h2, .prose > h3')[t.index];
+    else if (t.kind === 'term') el = main.querySelectorAll('.term-list > div')[t.index];
+    else if (t.kind === 'blank') el = main.querySelectorAll('.blanks-table tbody tr')[t.index];
+    else if (t.kind === 'review') { el = main.querySelectorAll('.review .rv')[t.index]; if (el) el.open = true; }
+    else if (t.kind === 'section') el = main.querySelector(t.id);
+    else if (t.kind === 'top') el = main.querySelector('.lesson-head');
+    if (!el) return;
+    el.scrollIntoView({ behavior: smooth(), block: 'start' });
+    el.classList.remove('flash');
+    void el.offsetWidth;
+    el.classList.add('flash');
+    el.setAttribute('tabindex', '-1');
+    el.focus({ preventScroll: true });
+  }
+  function openSource(t) {
+    const here = location.hash.replace(/^#/, '') === 'lesson-' + t.lessonId;
+    if (here) { scrollToTarget(t); return; }
+    pendingTarget = t;
+    location.hash = 'lesson-' + t.lessonId;
+  }
+  function currentLesson() {
+    const h = location.hash.replace(/^#/, '');
+    return h.startsWith('lesson-') ? byId[h.slice(7)] || null : null;
   }
 
   function setTitle(t) { document.title = t ? `${t} · Marginal Notes` : 'Marginal Notes'; }
@@ -140,8 +183,21 @@
     else if (next) primary = `<a class="btn btn-primary" href="#lesson-${next.id}">Continue: ${next.label}</a>`;
     else primary = '<a class="btn btn-primary" href="#exam">Take the practice exam</a>';
 
+    const moduleHtml = moduleUnits.map(u => {
+      const ls = lessonsIn(u);
+      return `
+        <section class="unit unit-module" aria-labelledby="unit-${u.id}">
+          <header class="unit-head">
+            <p class="unit-num">${topicRange(ls)}</p>
+            <h3 id="unit-${u.id}">${esc(u.title)}</h3>
+            <p class="unit-blurb">${esc(u.blurb)}</p>
+            ${progressLine(ls)}
+          </header>
+          <ol class="lesson-list">${lessonRows(ls)}</ol>
+        </section>`;
+    }).join('');
     const unitHtml = units.filter(u => !u.module).map(u => {
-      const ls = lessons.filter(l => l.unit === u.id);
+      const ls = lessonsIn(u);
       return `
       <section class="unit" aria-labelledby="unit-${u.id}">
         <header class="unit-head">
@@ -159,7 +215,7 @@
     <div class="wrap">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Your microeconomics module, Topics 1–${moduleLessons.length}</p>
+          <p class="eyebrow">Your economics module, ${moduleRange}</p>
           <h1>Economics is the study of choices made under scarcity.</h1>
           <p class="lede">Everything in your course notes, taught step by step with the same section numbers and examples. Each topic has graphs you can move, answers for the blanks in your notes, the “Do you know?” questions, and a quiz.</p>
           <div class="actions">${primary}<a class="btn" href="#labs">Open the labs</a></div>
@@ -176,17 +232,9 @@
       <section class="course" aria-labelledby="module-h">
         <div class="section-head">
           <h2 id="module-h">Your module</h2>
-          <p>The seven topics in your notes, in order. Pass each topic’s quiz to complete it.</p>
+          <p>The ${moduleLessons.length} topics in your notes, in order. Pass each topic’s quiz to complete it.</p>
         </div>
-        <section class="unit unit-module" aria-labelledby="unit-m">
-          <header class="unit-head">
-            <p class="unit-num">Topics 1–${moduleLessons.length}</p>
-            <h3 id="unit-m">${esc(moduleUnit.title)}</h3>
-            <p class="unit-blurb">${esc(moduleUnit.blurb)}</p>
-            ${progressLine(moduleLessons)}
-          </header>
-          <ol class="lesson-list">${lessonRows(moduleLessons)}</ol>
-        </section>
+        ${moduleHtml}
       </section>
       <section class="tools" aria-labelledby="tools-h">
         <div class="section-head"><h2 id="tools-h">Study tools</h2></div>
@@ -194,13 +242,13 @@
           <a class="tool" href="#labs"><span class="tool-title">Labs</span><span class="tool-desc">Every interactive graph and calculator in one place.</span></a>
           <a class="tool" href="#flashcards"><span class="tool-title">Flashcards</span><span class="tool-desc">${termsFor(moduleLessons).length} key terms from your module, with spaced repetition that brings back the ones you miss.</span></a>
           <a class="tool" href="#glossary"><span class="tool-title">Glossary</span><span class="tool-desc">Search every definition, with a link to where it’s taught.</span></a>
-          <a class="tool" href="#exam"><span class="tool-title">Practice exam</span><span class="tool-desc">A random mix of questions from all seven topics.${best ? ` Best score: ${best.best}/${best.total}.` : ''}</span></a>
+          <a class="tool" href="#exam"><span class="tool-title">Practice exam</span><span class="tool-desc">A random mix of questions from all ${moduleLessons.length} topics.${best ? ` Best score: ${best.best}/${best.total}.` : ''}</span></a>
         </div>
       </section>
       <section class="course course-wider" aria-labelledby="course-h">
         <div class="section-head">
           <h2 id="course-h">Go further</h2>
-          <p>A wider course of ${introLessons.length} lessons. Units 1–3 revisit your module’s topics from a different angle and add consumer surplus, taxes, game theory and market failure. Units 4–5 cover macroeconomics, which isn’t in Topics 1–7.</p>
+          <p>A wider course of ${introLessons.length} lessons that covers the same ground from a different angle. It adds topics your notes don’t, such as consumer surplus, taxes, game theory, market failure, long-run growth and exchange rates.</p>
         </div>
         ${unitHtml}
       </section>
@@ -253,9 +301,10 @@
           <span class="syl-n">${data.done[l.id] ? '<span class="tick" aria-label="complete">✓</span>' : l.n}</span><span>${esc(l.title)}</span>
         </a></li>`).join('')}
       </ol>`;
-    let html = block('Your module: Topics 1–' + moduleLessons.length, moduleLessons);
+    let html = '<p class="syl-track syl-track-first">Your module</p>';
+    html += moduleUnits.map(u => block(`${u.title}: ${topicRange(lessonsIn(u))}`, lessonsIn(u))).join('');
     html += '<p class="syl-track">Go further</p>';
-    html += units.filter(u => !u.module).map(u => block(`Unit ${u.n}: ${u.title}`, lessons.filter(l => l.unit === u.id))).join('');
+    html += units.filter(u => !u.module).map(u => block(`Unit ${u.n}: ${u.title}`, lessonsIn(u))).join('');
     return html;
   }
 
@@ -494,12 +543,25 @@
     { group: 'module', id: 'costs', title: 'Cost curves', lesson: 'm-costs', html: '<div data-widget="costs"></div>' },
     { group: 'module', id: 'lrac', title: 'LRAC', lesson: 'm-costs', html: '<div data-widget="lrac"></div>' },
     { group: 'module', id: 'structures', title: 'Market structures', lesson: 'm-structures', html: '<div data-widget="structures"></div>' },
+    { group: 'module', id: 'profitmax', title: 'MR = MC and shutdown', lesson: 'm-profit', html: '<div data-widget="profitmax"></div>' },
+    { group: 'module', id: 'stall', title: 'Drinks stall', lesson: 'm-profit', html: '<div data-widget="stall"></div>' },
+    { group: 'module', id: 'labour', title: 'Unemployment rate', lesson: 'm-unemployment', html: '<div data-widget="labour"></div>' },
+    { group: 'module', id: 'basket', title: 'CPI and inflation', lesson: 'm-unemployment', html: '<div data-widget="inflation" data-preset="basket"></div>' },
+    { group: 'module', id: 'inflation-m', title: 'Demand-pull vs cost-push', lesson: 'm-unemployment', html: '<div data-widget="adas" data-preset="m-inflation"></div>' },
+    { group: 'module', id: 'gdp', title: 'Nominal vs real GDP', lesson: 'm-gdp', html: '<div data-widget="gdp"></div>' },
+    { group: 'module', id: 'cycle', title: 'Business cycle', lesson: 'm-gdp', html: '<div data-widget="cycle"></div>' },
+    { group: 'module', id: 'adas-m', title: 'AD = AS', lesson: 'm-adas', html: '<div data-widget="adas" data-preset="m-adas"></div>' },
+    { group: 'module', id: 'multiplier', title: 'Income multiplier', lesson: 'm-adas', html: '<div data-widget="multiplier"></div>' },
+    { group: 'module', id: 'fiscal-m', title: 'Fiscal policy', lesson: 'm-fiscal', html: '<div data-widget="adas" data-preset="m-fiscal"></div>' },
+    { group: 'module', id: 'fiscalcalc', title: 'G and T multipliers', lesson: 'm-fiscal', html: '<div data-widget="fiscal"></div>' },
+    { group: 'module', id: 'credit', title: 'Credit creation', lesson: 'm-monetary', html: '<div data-widget="credit"></div>' },
+    { group: 'module', id: 'moneymarket', title: 'Money market', lesson: 'm-monetary', html: '<div data-widget="moneymarket"></div>' },
     { group: 'wider', id: 'market', title: 'Full market lab', lesson: 'equilibrium', html: '<div data-widget="market" data-preset="full"></div>' },
     { group: 'wider', id: 'advantage', title: 'Comparative advantage', lesson: 'trade', html: '<div data-widget="advantage"></div>' },
-    { group: 'wider', id: 'inflation', title: 'Inflation', lesson: 'inflation', html: '<div data-widget="inflation"></div>' },
-    { group: 'wider', id: 'adas', title: 'AD-AS model', lesson: 'ad-as', html: '<div data-widget="adas" data-preset="adas"></div>' },
-    { group: 'wider', id: 'monetary', title: 'Monetary policy', lesson: 'monetary-policy', html: '<div data-widget="adas" data-preset="monetary"></div>' },
-    { group: 'wider', id: 'fiscal', title: 'Fiscal policy', lesson: 'fiscal-policy', html: '<div data-widget="adas" data-preset="fiscal"></div>' }
+    { group: 'wider', id: 'inflation', title: 'Inflation since 1950', lesson: 'inflation', html: '<div data-widget="inflation"></div>' },
+    { group: 'wider', id: 'adas', title: 'AD-AS with LRAS', lesson: 'ad-as', html: '<div data-widget="adas" data-preset="adas"></div>' },
+    { group: 'wider', id: 'monetary', title: 'Interest rate policy', lesson: 'monetary-policy', html: '<div data-widget="adas" data-preset="monetary"></div>' },
+    { group: 'wider', id: 'fiscal', title: 'Fiscal policy (AD-AS)', lesson: 'fiscal-policy', html: '<div data-widget="adas" data-preset="fiscal"></div>' }
   ];
   function renderLabs() {
     setTitle('Labs');
@@ -536,7 +598,9 @@
     setTitle('Flashcards');
     const moduleTerms = termsFor(moduleLessons);
     const groups = [
-      ['Your module', [['module', `All ${moduleLessons.length} topics (${moduleTerms.length} terms)`]].concat(moduleLessons.map(l => [l.id, `${l.label}: ${l.title}`]))],
+      ['Your module', [['module', `All ${moduleLessons.length} topics (${moduleTerms.length} terms)`]]
+        .concat(moduleUnits.map(u => [u.id, `${u.title}: ${topicRange(lessonsIn(u))}`]))
+        .concat(moduleLessons.map(l => [l.id, `${l.label}: ${l.title}`]))],
       ['Go further', [['all', `Everything (${glossary.length} terms)`]]
         .concat(units.filter(u => !u.module).map(u => [u.id, `Unit ${u.n}: ${u.title}`]))
         .concat(introLessons.map(l => [l.id, `${l.label}: ${l.title}`]))]
@@ -745,7 +809,7 @@
         <div class="exam-setup">
           <fieldset>
             <legend>Questions from</legend>
-            <div class="radio"><input type="radio" name="scope" id="sc-module" value="module"${st.scope === 'module' ? ' checked' : ''}><label for="sc-module">Your module, Topics 1–${moduleLessons.length} (${pools.module().length} questions)</label></div>
+            <div class="radio"><input type="radio" name="scope" id="sc-module" value="module"${st.scope === 'module' ? ' checked' : ''}><label for="sc-module">Your module, ${moduleRange} (${pools.module().length} questions)</label></div>
             <div class="radio"><input type="radio" name="scope" id="sc-all" value="all"${st.scope === 'all' ? ' checked' : ''}><label for="sc-all">Everything: your module and the wider course (${pools.all().length} questions)</label></div>
             <div class="radio"><input type="radio" name="scope" id="sc-done" value="done"${st.scope === 'done' ? ' checked' : ''}${nDone < 5 ? ' disabled' : ''}><label for="sc-done">Only what I’ve completed${nDone < 5 ? ' (complete a topic first)' : ` (${nDone} questions)`}</label></div>
           </fieldset>
@@ -847,6 +911,7 @@
     });
   }
 
+  ECON.app = { openSource, currentLesson, moduleLessons };
   document.getElementById('skip-link').addEventListener('click', e => {
     e.preventDefault();
     main.focus();

@@ -119,7 +119,7 @@
     };
     c.hline = (p, cls, label) => {
       s('line', { x1: c.X(0), x2: c.X(c.opts.xMax), y1: c.Y(p), y2: c.Y(p), class: cls }, c.layers.lines);
-      if (label) stext(c.layers.labels, c.X(c.opts.xMax) - 4, c.Y(p) - 6, label, { class: 'curve-label ' + cls, 'text-anchor': 'end' });
+      if (label) stext(c.layers.labels, c.X(c.opts.xMax) - 4, c.Y(p) - 6, label, { class: 'curve-label ' + cls.replace(/\bcurve\b/g, '').trim(), 'text-anchor': 'end' });
     };
     c.label = (x, y, str, cls) => {
       const nearRight = x > c.w - c.m.r - 40;
@@ -942,15 +942,58 @@
     }
   };
 
+  /* Module presets follow the notes' diagram: one upward-sloping AS curve, with full employment
+     output Yf marked, and "recessionary / inflationary situation" wording. */
+  Object.assign(ADAS_PRESETS, {
+    'm-inflation': {
+      module: true, title: 'Demand-pull or cost-push?', desc: 'Pick a cause of inflation and watch what happens to the price level and output.',
+      scenarios: [
+        { label: 'Demand-pull inflation', set: { ad: 15, as: 0 }, text: 'Total spending rises, for example a surge in consumption or government spending. AD shifts right: the price level rises and output rises. This is demand-pull inflation.' },
+        { label: 'Cost-push inflation', set: { ad: 0, as: -15 }, text: 'Production costs rise: higher wages, rents or oil prices, or a weaker exchange rate. AS shifts left: the price level rises and output falls. This is cost-push inflation.' }
+      ]
+    },
+    'm-cycle': {
+      module: true, title: 'Causes of recession and recovery', desc: 'Start a recession, then try a recovery that matches its cause.',
+      scenarios: [
+        { label: 'Recession: AD falls', set: { ad: -15, as: 0 }, text: 'Spending (C, I, G or X − M) falls. AD shifts left: output and employment fall, and the price level falls.' },
+        { label: 'Recession: AS falls', set: { ad: 0, as: -15 }, text: 'Production costs rise. AS shifts left: output and employment fall while the price level rises. High unemployment with rising prices is stagflation.' },
+        { label: 'Recovery: raise AD', add: { ad: 15 }, text: 'Spending rises, usually through investment or government spending. AD shifts right: output, employment and income rise, and prices rise too (demand-pull inflation).' },
+        { label: 'Recovery: raise AS', add: { as: 15 }, text: 'Costs fall, from lower factor prices or higher productivity. AS shifts right: output and employment rise and the price level falls.' }
+      ]
+    },
+    'm-adas': {
+      module: true, title: 'Where is equilibrium, compared with Yf?', desc: 'Equilibrium output Ye is where AD = AS. Compare it with full employment output Yf.',
+      scenarios: [
+        { label: 'Recessionary situation', set: { ad: -15, as: 0 }, text: 'Spending is too low, so equilibrium output is below full employment.' },
+        { label: 'Inflationary situation', set: { ad: 15, as: 0 }, text: 'Spending is too high, so equilibrium output is above full employment.' },
+        { label: 'Shift AD to reach Yf', toYf: true, text: 'AD is shifted just enough for equilibrium output to equal full employment output.' }
+      ]
+    },
+    'm-fiscal': {
+      module: true, title: 'Fiscal policy on the AD-AS diagram', desc: 'Pick a situation, then respond with government spending (G) or taxes (T).',
+      scenarios: [
+        { label: 'Recessionary situation', set: { ad: -15, as: 0 }, text: 'Output is below full employment, so there is cyclical unemployment.' },
+        { label: 'Inflationary situation', set: { ad: 15, as: 0 }, text: 'Output is above full employment, so the economy is overheating.' },
+        { label: 'Raise G', add: { ad: 12 }, text: 'Expansionary: higher government spending raises AD directly, and the multiplier spreads the extra income. AD shifts right.' },
+        { label: 'Cut taxes', add: { ad: 9 }, text: 'Expansionary: T ↓ → disposable income ↑ → C ↑ → AD shifts right. The shift is smaller than for the same rise in G, because part of the tax cut is saved.' },
+        { label: 'Cut G', add: { ad: -12 }, text: 'Contractionary: lower government spending reduces AD. AD shifts left.' },
+        { label: 'Raise taxes', add: { ad: -9 }, text: 'Contractionary: T ↑ → disposable income ↓ → C ↓ → AD shifts left.' }
+      ]
+    }
+  });
+
   function adas(host, presetName) {
     const P = ADAS_PRESETS[presetName] || ADAS_PRESETS.adas;
+    const M = !!P.module;
     const st = { ad: 0, as: 0, lr: 0, scenario: null };
     const LIM = { ad: [-30, 30], as: [-50, 50], lr: [-10, 20] };
     const f = frame(P.title, P.desc, 'lab-adas');
     const chart = Chart(f.plot, {
       xMax: 100, yMax: 200, xStep: 20, yStep: 40, xLabel: 'Real GDP', yLabel: 'Price level', left: 50, label: 'Aggregate demand and aggregate supply graph'
     });
-    f.plot.appendChild(legend([['demand', 'Aggregate demand'], ['supply', 'Short-run supply'], ['lras', 'Long-run supply']]));
+    f.plot.appendChild(legend(M
+      ? [['demand', 'Aggregate demand (AD)'], ['supply', 'Aggregate supply (AS)'], ['yf', 'Full employment output (Yf)']]
+      : [['demand', 'Aggregate demand'], ['supply', 'Short-run supply'], ['lras', 'Long-run supply']]));
 
     const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Events and policies' });
     const btns = P.scenarios.map((sc, i) => {
@@ -962,6 +1005,7 @@
           const a = 200 + 2 * st.ad, yp = 50 + st.lr;
           st.as = clamp((4 * yp - a) / 2, ...LIM.as);
         }
+        if (sc.toYf) st.ad = clamp((4 * (50 + st.lr) - 2 * st.as - 200) / 2, ...LIM.ad);
         st.scenario = i;
         sync(); draw();
       });
@@ -970,13 +1014,15 @@
     });
     const fmt = v => v === 0 ? 'No shift' : signed(v);
     const adS = slider({ name: 'ad', label: 'Aggregate demand', min: LIM.ad[0], max: LIM.ad[1], step: 5, value: 0, fmt, hint: ['← decrease', 'increase →'], onInput: v => { st.ad = v; st.scenario = null; draw(); } });
-    const asS = slider({ name: 'sras', label: 'Short-run aggregate supply', min: LIM.as[0], max: LIM.as[1], step: 5, value: 0, fmt, hint: ['← decrease', 'increase →'], onInput: v => { st.as = v; st.scenario = null; draw(); } });
+    const asS = slider({ name: 'sras', label: M ? 'Aggregate supply' : 'Short-run aggregate supply', min: LIM.as[0], max: LIM.as[1], step: 5, value: 0, fmt, hint: ['← decrease', 'increase →'], onInput: v => { st.as = v; st.scenario = null; draw(); } });
     const lrS = slider({ name: 'lras', label: 'Potential output (LRAS)', min: LIM.lr[0], max: LIM.lr[1], step: 5, value: 0, fmt, onInput: v => { st.lr = v; st.scenario = null; draw(); } });
     const dl = h('dl', { class: 'readout' });
     const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
     const reset = h('button', { type: 'button', class: 'btn btn-quiet', text: 'Reset' });
     reset.addEventListener('click', () => { Object.assign(st, { ad: 0, as: 0, lr: 0, scenario: null }); sync(); draw(); });
-    f.panel.append(h('p', { class: 'panel-label', text: P.scenarios.some(x => x.add) ? 'Shocks and policy responses' : 'Try a shock' }), chips, adS.row, asS.row, lrS.row, dl, note, reset);
+    f.panel.append(h('p', { class: 'panel-label', text: P.scenarios.some(x => x.add) ? (M ? 'Situations and responses' : 'Shocks and policy responses') : (M ? 'Try it' : 'Try a shock') }), chips, adS.row, asS.row);
+    if (!M) f.panel.appendChild(lrS.row);
+    f.panel.append(dl, note, reset);
 
     function sync() {
       adS.set(st.ad); asS.set(st.as); lrS.set(st.lr);
@@ -993,12 +1039,29 @@
       if (st.ad !== 0) chart.line(200, -2, 'curve demand ghost');
       if (st.as !== 0) chart.line(0, 2, 'curve supply ghost');
       if (st.lr !== 0) chart.vline(50, 'curve lras ghost');
-      chart.vline(yp, 'curve lras', 'LRAS');
+      chart.vline(yp, M ? 'curve yf' : 'curve lras', M ? 'Yf' : 'LRAS');
       chart.line(a, -2, 'curve demand', 'AD', 'end');
-      chart.line(c, 2, 'curve supply', 'SRAS', 'end');
+      chart.line(c, 2, 'curve supply', M ? 'AS' : 'SRAS', 'end');
       chart.guides(Y, Pl, trim(Y, 1), trim(Pl, 1));
       chart.dot(Y, Pl, 'eq');
 
+      if (M) {
+        const sit = Math.abs(gap) <= 0.5 ? ['At full employment (Ye = Yf)', 'k-good'] : gap < 0 ? ['Recessionary situation (Ye < Yf)', 'k-warn'] : ['Inflationary situation (Ye > Yf)', 'k-hot'];
+        readout(dl, [
+          ['Equilibrium output (Ye)', trim(Y, 1)],
+          ['Price level', trim(Pl, 1)],
+          ['Full employment output (Yf)', trim(yp, 1)],
+          ['Ye − Yf', signed(gap)],
+          ['Situation', sit[0], sit[1] + ' k-wide']
+        ]);
+        const sum = Math.abs(gap) <= 0.5
+          ? 'Equilibrium output equals full employment output: unemployment is at its natural rate.'
+          : gap < 0
+            ? `Ye is ${trim(-gap, 1)} below Yf: a recessionary situation with cyclical unemployment. AD needs to increase.`
+            : `Ye is ${trim(gap, 1)} above Yf: an inflationary situation. AD needs to decrease.`;
+        note.textContent = (st.scenario != null ? P.scenarios[st.scenario].text + ' ' : '') + sum;
+        return;
+      }
       const status = Math.abs(gap) <= 0.5 ? ['At potential output', 'k-good'] : gap < 0 ? ['Recessionary gap', 'k-warn'] : ['Inflationary gap', 'k-hot'];
       readout(dl, [
         ['Real GDP', trim(Y, 1)],
@@ -1575,10 +1638,527 @@
     autosize(chart, f.plot, draw);
   }
 
+  /* Two charts in one widget: size both to their containers and redraw together. */
+  function autosize2(c1, host1, c2, host2, draw) {
+    let w1 = 0, w2 = 0;
+    const fit = () => {
+      const a = host1.clientWidth || 480, b = host2.clientWidth || 480;
+      if (Math.abs(a - w1) < 4 && Math.abs(b - w2) < 4) return;
+      w1 = a; w2 = b;
+      c1.build(a); c2.build(b);
+      draw();
+    };
+    fit();
+    if ('ResizeObserver' in window) { const ro = new ResizeObserver(fit); ro.observe(host1); ro.observe(host2); }
+    else window.addEventListener('resize', fit);
+  }
+  function numField(key, label, value, onInput, prefix, attrs) {
+    const fid = id('nf-' + key);
+    const inp = h('input', Object.assign({ type: 'number', id: fid, step: 'any', value, inputmode: 'decimal' }, attrs || {}));
+    inp.addEventListener('input', () => onInput(inp.value === '' ? NaN : parseFloat(inp.value)));
+    return h('div', { class: 'field' + (prefix ? ' has-prefix' : '') }, [h('label', { for: fid, text: label }), prefix ? h('span', { class: 'prefix', text: prefix, 'aria-hidden': 'true' }) : null, inp]);
+  }
+  const num = (v, d = 1) => trim(v, d);
+  const bn = v => (v < 0 ? '−$' : '$') + trim(Math.abs(v), 2) + 'b';
+  const mn = v => (v < 0 ? '−$' : '$') + trim(Math.abs(v), 1) + 'm';
+
+  /* ======================================================================
+     PROFITMAX — a price-taking firm: MR = MC, profit/loss and the shutdown rule (Topic 8)
+     Costs: TFC = 60, AVC = 12 − 1.2q + 0.06q², MC = 12 − 2.4q + 0.18q²
+     ====================================================================== */
+  function profitmax(host) {
+    const F = 60;
+    const AVC = q => 12 - 1.2 * q + 0.06 * q * q;
+    const ATC = q => AVC(q) + F / q;
+    const MC = q => 12 - 2.4 * q + 0.18 * q * q;
+    let qBE = 1, minATC = Infinity;
+    for (let q = 1; q <= 20; q += 0.01) { const v = ATC(q); if (v < minATC) { minATC = v; qBE = q; } }
+    const minAVC = AVC(10); // at q = 10
+    const qStar = P => { const d = 5.76 - 0.72 * (12 - P); return d < 0 ? null : (2.4 + Math.sqrt(d)) / 0.36; };
+    const st = { P: 16, qt: 6 };
+    const f = frame('Profit maximisation and the shutdown rule', 'A price taker sells at the market price, so P = MR. Set the price and see the best output, the profit or loss, and whether to keep producing.', 'lab-profitmax');
+    const chart = Chart(f.plot, { xMax: 20, yMax: 30, xStep: 2, yStep: 5, xLabel: 'Output (units per day)', yLabel: 'Revenue and cost per unit ($)', yFmt: v => '$' + v, left: 50, ratio: 0.72, label: 'MR, MC, ATC and AVC for a price-taking firm' });
+    f.plot.appendChild(legend([['mr', 'P = MR'], ['mc', 'MC'], ['atc', 'ATC'], ['avc', 'AVC'], ['profit', 'Profit'], ['loss', 'Loss']]));
+    const pSl = slider({ name: 'price', label: 'Market price (= MR)', min: 3, max: 24, step: 0.5, value: st.P, fmt: money, onInput: v => { st.P = v; draw(); } });
+    const tSl = slider({ name: 'testq', label: 'Test an output level', min: 1, max: 20, step: 1, value: st.qt, fmt: v => v + ' units', onInput: v => { st.qt = v; draw(); } });
+    const test = h('p', { class: 'lab-note lab-test', 'aria-live': 'polite' });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(pSl.row, dl, note, tSl.row, test);
+
+    function curve(fn, lo, cls, label) {
+      const pts = [];
+      for (let q = lo; q <= 20.001; q += 0.1) { const v = fn(q); if (v <= 30 && v >= 0) pts.push([q, v]); }
+      chart.path(pts, 'curve ' + cls);
+      const e = pts[pts.length - 1];
+      chart.label(chart.X(e[0]), chart.Y(e[1]), label, cls);
+    }
+    function draw() {
+      chart.clear();
+      const P = st.P;
+      let q = qStar(P);
+      const shut = q === null || P < minAVC - 1e-9;
+      const atShut = Math.abs(P - minAVC) < 0.26;
+      if (!shut && q > 20) q = 20;
+      if (!shut) {
+        const atc = ATC(q);
+        chart.poly([[0, P], [q, P], [q, atc], [0, atc]], P >= atc ? 'fill-profit' : 'fill-loss');
+      }
+      curve(ATC, 2.2, 'atc', 'ATC');
+      curve(AVC, 0.3, 'avc', 'AVC');
+      curve(MC, 0.3, 'mc', 'MC');
+      chart.hline(P, 'curve mr');
+      chart.text(0.4, P, 'P = MR', 'mr-label', 'start', -7);
+      chart.dot(qBE, minATC, 'min-dot');
+      chart.text(qBE, minATC, 'Breakeven', 'point-note', 'middle', 22);
+      chart.dot(10, minAVC, 'min-dot');
+      chart.text(10, minAVC, 'Shutdown point', 'point-note', 'middle', 22);
+      s('line', { x1: chart.X(st.qt), x2: chart.X(st.qt), y1: chart.Y(0), y2: chart.Y(30), class: 'guide test-line' }, chart.layers.marks);
+      if (!shut) { chart.guides(q, P, trim(q, 1), null, 'point'); chart.dot(q, P, 'point'); }
+
+      let rows, txt;
+      if (shut) {
+        rows = [['Price = MR', money(P)], ['Best output', '0 (shut down)'], ['Loss', money(-F), 'k-hot'], ['Decision', atShut ? 'Indifferent (shutdown point)' : 'Shut down', 'k-wide k-hot']];
+        txt = `The price (${money(P)}) is below the lowest AVC (${money(minAVC)}), so revenue can’t even cover variable costs. Shutting down limits the loss to the fixed cost, ${money(F)}.`;
+      } else {
+        const atc = ATC(q), avc = AVC(q), tr = P * q, tc = atc * q, profit = tr - tc;
+        let dec, cls;
+        if (Math.abs(profit) < 1.5) { dec = 'Normal profit (breakeven): produce'; cls = 'k-good'; }
+        else if (profit > 0) { dec = 'Economic profit: produce'; cls = 'k-good'; }
+        else if (atShut) { dec = 'Indifferent (shutdown point)'; cls = 'k-warn'; }
+        else { dec = 'Loss, but P > AVC: keep producing'; cls = 'k-warn'; }
+        rows = [['Price = MR', money(P)], ['Best output (MR = MC)', trim(q, 1)], ['ATC at that output', money(atc)], ['AVC at that output', money(avc)], ['TR', money(tr)], ['TC', money(tc)], [profit >= 0 ? 'Profit' : 'Loss', money(profit), profit >= 0 ? 'k-good' : 'k-hot'], ['Decision', dec, 'k-wide ' + cls]];
+        txt = profit > 1.5 ? `P (${money(P)}) is above ATC (${money(atc)}), so the firm earns economic profit (the green rectangle).`
+          : profit > -1.5 ? `P is at the minimum of ATC: TR = TC, so the firm earns normal profit. This is the breakeven point.`
+            : `P (${money(P)}) is below ATC (${money(atc)}), so the firm makes a loss (the red rectangle) of ${money(-profit)}. But P is above AVC (${money(avc)}): revenue covers the variable costs and part of the fixed cost, so producing loses less than shutting down (${money(F)}).`;
+      }
+      readout(dl, rows);
+      note.textContent = txt;
+      const mcT = MC(st.qt);
+      test.textContent = Math.abs(mcT - P) < 0.3
+        ? `At ${st.qt} units, MR (${money(P)}) ≈ MC (${money(mcT)}). There’s no reason to change output.`
+        : mcT < P
+          ? `At ${st.qt} units, MR (${money(P)}) > MC (${money(mcT)}). One more unit adds more to revenue than to cost, so the firm should increase output.`
+          : `At ${st.qt} units, MR (${money(P)}) < MC (${money(mcT)}). One more unit adds more to cost than to revenue, so the firm should decrease output.`;
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     STALL — the sweet drinks example: produce or shut down? (Topic 8)
+     ====================================================================== */
+  function stall(host) {
+    const st = { P: 1, TFC: 100, TVC: 75, Q: 100 };
+    const f = frame('Should the drinks stall open today?', 'Your notes’ example: 100 cups a day, $100 stall rental (fixed) and $75 for a worker, lights, water and ingredients (variable). Change the price.', 'lab-calc lab-stall');
+    f.body.classList.add('lab-body-calc');
+    const pSl = slider({ name: 'cup', label: 'Price per cup', min: 0.25, max: 2.5, step: 0.05, value: st.P, fmt: money, onInput: v => { st.P = v; calc(); } });
+    const fields = h('div', { class: 'el-grid el-grid-3' }, [
+      numField('tfc', 'Total fixed cost', st.TFC, v => { st.TFC = v; calc(); }, '$', { min: '0' }),
+      numField('tvc', 'Total variable cost', st.TVC, v => { st.TVC = v; calc(); }, '$', { min: '0' }),
+      numField('cups', 'Cups sold', st.Q, v => { st.Q = v; calc(); }, null, { min: '1' })
+    ]);
+    const meter = h('div', { class: 'pmeter', 'aria-hidden': 'true' });
+    f.plot.append(pSl.row, fields, meter);
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+    function calc() {
+      const { P, TFC, TVC, Q } = st;
+      if (![TFC, TVC, Q].every(v => isFinite(v) && v >= 0) || Q <= 0) { readout(dl, []); note.textContent = 'Enter costs of zero or more and at least one cup.'; return; }
+      const avc = TVC / Q, afc = TFC / Q, atc = avc + afc, tr = P * Q;
+      const open = tr - TVC - TFC, shutLoss = -TFC;
+      const max = Math.max(2.5, atc * 1.4);
+      const pos = v => Math.min(100, v / max * 100) + '%';
+      meter.innerHTML = `<div class="pm-track"><span class="pm-zone shut" style="width:${pos(avc)}">Shut down</span><span class="pm-zone lossopen" style="width:calc(${pos(atc)} - ${pos(avc)})">Loss, stay open</span><span class="pm-zone profit">Profit</span></div>
+        <div class="pm-mark" style="left:${pos(avc)}"><span>AVC ${money(avc)}</span></div><div class="pm-mark" style="left:${pos(atc)}"><span>ATC ${money(atc)}</span></div>
+        <div class="pm-price" style="left:${pos(P)}"></div>`;
+      let dec, cls, txt;
+      if (P > atc + 0.005) { dec = 'Economic profit: open'; cls = 'k-good'; txt = `P > ATC. Revenue (${money(tr)}) covers all costs (${money(TFC + TVC)}), leaving ${money(open)} of economic profit.`; }
+      else if (Math.abs(P - atc) <= 0.005) { dec = 'Normal profit: open'; cls = 'k-good'; txt = 'P = ATC, so TR = TC: normal profit, the breakeven point.'; }
+      else if (P > avc + 0.005) { dec = 'Loss, but open (P > AVC)'; cls = 'k-warn'; txt = `P < ATC, so the stall makes a loss. But P > AVC: after paying the ${money(TVC)} variable costs, ${money(tr - TVC)} is left toward the rent. Opening loses ${money(-open)}; shutting loses the full ${money(TFC)}.`; }
+      else if (Math.abs(P - avc) <= 0.005) { dec = 'Indifferent (shutdown point)'; cls = 'k-warn'; txt = 'P = AVC: revenue exactly covers variable costs, so the loss is the full fixed cost whether you open or not.'; }
+      else { dec = 'Shut down (P < AVC)'; cls = 'k-hot'; txt = `P < AVC: revenue (${money(tr)}) doesn’t even cover the ${money(TVC)} variable costs. Opening loses ${money(-open)}; shutting down loses only the ${money(TFC)} rent.`; }
+      readout(dl, [['AFC', money(afc)], ['AVC', money(avc)], ['ATC', money(atc)], ['TR', money(tr)], ['Profit if open', money(open), open >= 0 ? 'k-good' : 'k-hot'], ['Loss if shut', money(shutLoss), 'k-hot'], ['Decision', dec, 'k-wide ' + cls]]);
+      note.textContent = txt;
+    }
+    calc();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     LABOUR — unemployment rate and participation rate (Topic 9)
+     ====================================================================== */
+  function labour(host) {
+    const st = { E: 3570, U: 102.8, W: NaN, D: 0 };
+    const f = frame('Unemployment rate calculator', 'Numbers in thousands. It starts with Singapore’s 2016 figures from your notes. Add the working-age population (15 and above) for the participation rate.', 'lab-calc lab-labour');
+    f.body.classList.add('lab-body-calc');
+    const fields = h('div', { class: 'el-grid el-grid-2' }, [
+      numField('emp', 'Employed', st.E, v => { st.E = v; calc(); }, null, { min: '0' }),
+      numField('unemp', 'Unemployed (actively looking)', st.U, v => { st.U = v; calc(); }, null, { min: '0' }),
+      numField('wap', 'Population aged 15+ (optional)', '', v => { st.W = v; calc(); }, null, { min: '0', placeholder: 'e.g. 5,000' }),
+      numField('disc', 'Discouraged workers (optional)', st.D, v => { st.D = v; calc(); }, null, { min: '0' })
+    ]);
+    const bar = h('div', { class: 'popbar', 'aria-hidden': 'true' });
+    f.plot.append(fields, bar);
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+    function calc() {
+      const { E, U, W } = st, D = isFinite(st.D) ? st.D : 0;
+      if (!(isFinite(E) && isFinite(U) && E >= 0 && U >= 0 && E + U > 0)) { readout(dl, []); note.textContent = 'Enter the number employed and unemployed.'; bar.innerHTML = ''; return; }
+      const LF = E + U, ur = U / LF;
+      const rows = [['Labour force', trim(LF, 1)], ['Unemployment rate', pct(ur), 'k-big']];
+      let txt = `Unemployment rate = ${trim(U, 1)} ÷ ${trim(LF, 1)} × 100% = ${pct(ur)}.`;
+      const hasW = isFinite(W) && W >= LF;
+      if (hasW) {
+        rows.push(['Participation rate', pct(LF / W)]);
+        rows.push(['Economically inactive', trim(W - LF, 1)]);
+        txt += ` Participation rate = ${trim(LF, 1)} ÷ ${trim(W, 1)} × 100% = ${pct(LF / W)}.`;
+      } else if (isFinite(W)) {
+        txt += ' The working-age population can’t be smaller than the labour force.';
+      }
+      if (D > 0) {
+        const adj = (U + D) / (LF + D);
+        rows.push(['If discouraged workers counted', pct(adj), 'k-warn']);
+        txt += ` Counting the ${trim(D, 1)} discouraged workers would raise the rate to ${pct(adj)}: the official rate understates the problem.`;
+      }
+      readout(dl, rows);
+      note.textContent = txt;
+      const total = hasW ? W : LF + D;
+      const seg = (v, cls, label) => v > 0 ? `<span class="pb ${cls}" style="flex:${v}">${v / total > 0.12 ? label : ''}</span>` : '';
+      bar.innerHTML = `<div class="pb-track">${seg(E, 'emp', 'Employed')}${seg(U, 'unemp', 'Unemployed')}${seg(D, 'disc', 'Discouraged')}${hasW ? seg(W - LF - D, 'inact', 'Inactive') : ''}</div>
+        <ul class="legend"><li><span class="sw pb-emp"></span>Employed</li><li><span class="sw pb-unemp"></span>Unemployed</li>${D > 0 ? '<li><span class="sw pb-disc"></span>Discouraged</li>' : ''}${hasW ? '<li><span class="sw pb-inact"></span>Economically inactive</li>' : ''}</ul>`;
+    }
+    calc();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     BASKET — CPI from a basket of goods, the inflation rate and real income (Topic 9)
+     ====================================================================== */
+  function basket(host) {
+    const items = [
+      { name: 'Oranges', q: 10, p0: 1, p1: 2 },
+      { name: 'Haircuts', q: 5, p0: 8, p1: 10 }
+    ];
+    const st = { income: 40000 };
+    const f = frame('CPI and inflation calculator', 'Your notes’ basket: oranges and haircuts, with 2014 as the base year. Change quantities or prices.', 'lab-calc lab-basket');
+    f.body.classList.add('lab-body-calc');
+    const table = h('div', { class: 'basket-grid' });
+    const head = ['Item', 'Quantity', '2014 price', '2015 price'].map(t => h('span', { class: 'bg-head', text: t }));
+    table.append(...head);
+    items.forEach((it, i) => {
+      table.appendChild(h('span', { class: 'bg-name', text: it.name }));
+      [['q', ''], ['p0', '$'], ['p1', '$']].forEach(([k, pre]) => {
+        const fid = id('bk-' + i + k);
+        const inp = h('input', { type: 'number', id: fid, min: '0', step: 'any', value: it[k], inputmode: 'decimal', 'aria-label': `${it.name} ${k === 'q' ? 'quantity' : k === 'p0' ? '2014 price' : '2015 price'}` });
+        inp.addEventListener('input', () => { it[k] = parseFloat(inp.value); calc(); });
+        table.appendChild(h('span', { class: 'field' + (pre ? ' has-prefix' : '') }, [pre ? h('span', { class: 'prefix', text: pre, 'aria-hidden': 'true' }) : null, inp]));
+      });
+    });
+    f.plot.append(table, h('div', { class: 'el-grid el-grid-1' }, [numField('inc', 'Money income in 2015 (for real income)', st.income, v => { st.income = v; calc(); }, '$', { min: '0' })]));
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+    function calc() {
+      if (!items.every(it => [it.q, it.p0, it.p1].every(v => isFinite(v) && v >= 0))) { readout(dl, []); note.textContent = 'Enter quantities and prices of zero or more.'; return; }
+      const c0 = items.reduce((a, it) => a + it.q * it.p0, 0), c1 = items.reduce((a, it) => a + it.q * it.p1, 0);
+      if (c0 <= 0) { readout(dl, []); note.textContent = 'The base-year basket must cost more than $0.'; return; }
+      const cpi1 = c1 / c0 * 100, infl = (cpi1 - 100) / 100;
+      const rows = [['Basket cost, 2014', money(c0)], ['Basket cost, 2015', money(c1)], ['CPI 2014 (base)', '100'], ['CPI 2015', trim(cpi1, 1), 'k-big'], ['Inflation rate', pct(infl), infl > 0 ? 'k-hot' : 'k-good']];
+      let txt = `CPI 2015 = ${money(c1)} ÷ ${money(c0)} × 100 = ${trim(cpi1, 1)}. Inflation = (${trim(cpi1, 1)} − 100) ÷ 100 × 100% = ${pct(infl)}.`;
+      if (isFinite(st.income) && st.income >= 0 && cpi1 > 0) {
+        const real = st.income / cpi1 * 100;
+        rows.push(['Real income (2014 dollars)', money(real)]);
+        txt += ` A money income of ${money(st.income)} is worth ${money(real)} in base-year dollars (money income ÷ CPI × 100).`;
+      }
+      readout(dl, rows);
+      note.textContent = txt;
+    }
+    calc();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     GDP — money (nominal) vs real GDP, the deflator and growth (Topic 10)
+     ====================================================================== */
+  function gdp(host) {
+    const st = { p0: 4, q0: 100000, p1: 6, q1: 80000 };
+    const f = frame('Money GDP or real GDP?', 'Your notes’ one-product economy that only makes chicken rice. 2015 is the base year.', 'lab-calc lab-gdp');
+    f.body.classList.add('lab-body-calc');
+    f.plot.append(h('div', { class: 'el-grid' }, [
+      h('p', { class: 'adv-name', text: '2015' }), numField('p0', 'Price', st.p0, v => { st.p0 = v; calc(); }, '$', { min: '0' }), numField('q0', 'Plates', st.q0, v => { st.q0 = v; calc(); }, null, { min: '0' }),
+      h('p', { class: 'adv-name', text: '2016' }), numField('p1', 'Price', st.p1, v => { st.p1 = v; calc(); }, '$', { min: '0' }), numField('q1', 'Plates', st.q1, v => { st.q1 = v; calc(); }, null, { min: '0' })
+    ]));
+    const bars = h('div', { class: 'gdp-bars', 'aria-hidden': 'true' });
+    f.plot.appendChild(bars);
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+    function calc() {
+      const { p0, q0, p1, q1 } = st;
+      if (![p0, q0, p1, q1].every(v => isFinite(v) && v > 0)) { readout(dl, []); note.textContent = 'Enter prices and quantities above zero.'; bars.innerHTML = ''; return; }
+      const m0 = p0 * q0, m1 = p1 * q1, r1 = p0 * q1, defl = m1 / r1 * 100;
+      const gm = (m1 - m0) / m0, gr = (r1 - m0) / m0;
+      readout(dl, [
+        ['Money GDP 2015', money(m0)], ['Money GDP 2016', money(m1)],
+        ['Real GDP 2016 (2015 prices)', money(r1), 'k-big'], ['GDP deflator 2016', trim(defl, 1)],
+        ['Money GDP growth', pct(gm)], ['Economic growth (real)', pct(gr), gr >= 0 ? 'k-good' : 'k-hot']
+      ]);
+      note.textContent = `Real GDP 2016 = 2015 price × 2016 quantity = ${money(p0)} × ${q1.toLocaleString('en-US')} = ${money(r1)}. `
+        + (gm > 0 && gr < 0 ? `Money GDP rose ${pct(gm)}, but real GDP fell ${pct(-gr)}: prices rose while output fell, so society is not better off.`
+          : gr > 0 ? `Real GDP rose ${pct(gr)}: the economy produced more, so society is better off (before considering population and the other limits of GDP).`
+            : `Real GDP changed by ${pct(gr)}.`);
+      const max = Math.max(m0, m1, r1);
+      const bar = (label, v, cls) => `<div class="gb-row"><span class="gb-label">${label}</span><span class="gb-track"><span class="gb-fill ${cls}" style="width:${v / max * 100}%"></span></span><span class="gb-val">${money(v)}</span></div>`;
+      bars.innerHTML = bar('Money GDP 2015', m0, 'gb-base') + bar('Money GDP 2016', m1, 'gb-money') + bar('Real GDP 2016', r1, 'gb-real');
+    }
+    calc();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     CYCLE — the four phases of the business cycle (Topic 10)
+     ====================================================================== */
+  function cycle(host) {
+    const Y = t => 40 + 0.22 * t + 9 * Math.sin(2 * Math.PI * (t - 4) / 48);
+    const dY = t => (Y(t + 0.05) - Y(t - 0.05)) / 0.1;
+    const peaks = [], troughs = [];
+    for (let t = 1; t < 100; t += 0.05) {
+      if (dY(t - 0.05) > 0 && dY(t) <= 0) peaks.push(t);
+      if (dY(t - 0.05) < 0 && dY(t) >= 0) troughs.push(t);
+    }
+    const st = { t: 22 };
+    const f = frame('The business cycle', 'Move through time and watch real GDP rise and fall around its long-run trend.', 'lab-cycle');
+    const chart = Chart(f.plot, { xMax: 100, yMax: 80, xStep: 20, yStep: 20, xLabel: 'Time', yLabel: 'Real GDP', bare: true, left: 24, ratio: 0.55, label: 'Business cycle diagram' });
+    f.plot.appendChild(legend([['cyc', 'Real GDP'], ['trend', 'Long-run trend'], ['recession', 'Recession']]));
+    const sl = slider({ name: 'time', label: 'Time', min: 1, max: 99, step: 1, value: st.t, onInput: v => { st.t = v; draw(); } });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(sl.row, dl, note);
+    const PH = {
+      Recession: ['Real GDP falls', 'Unemployment rises', 'The declining phase. A technical recession is 2 consecutive quarters of negative economic growth.'],
+      Trough: ['Real GDP at its lowest', 'Unemployment at its highest', 'The turning point: the contraction bottoms out.'],
+      Recovery: ['Real GDP rises', 'Unemployment falls', 'The expanding phase.'],
+      Peak: ['Real GDP at its highest', 'Close to full employment', 'The highest point, before the next recession.']
+    };
+    function phase(t) {
+      if (peaks.some(p => Math.abs(p - t) < 2.5)) return 'Peak';
+      if (troughs.some(p => Math.abs(p - t) < 2.5)) return 'Trough';
+      return dY(t) < 0 ? 'Recession' : 'Recovery';
+    }
+    function draw() {
+      chart.clear();
+      peaks.forEach(p => { const tr = troughs.find(x => x > p) || 100; chart.poly([[p, 0], [tr, 0], [tr, 80], [p, 80]], 'fill-recession'); });
+      chart.line(40, 0.22, 'curve trend');
+      const pts = []; for (let t = 0; t <= 100; t += 0.5) pts.push([t, Y(t)]);
+      chart.path(pts, 'curve cyc');
+      peaks.forEach(p => chart.text(p, Y(p), 'Peak', 'phase-label', 'middle', -12));
+      troughs.forEach(p => chart.text(p, Y(p), 'Trough', 'phase-label', 'middle', 22));
+      if (peaks.length > 1) {
+        const y = 76;
+        s('line', { x1: chart.X(peaks[0]), x2: chart.X(peaks[1]), y1: chart.Y(y), y2: chart.Y(y), class: 'bracket cyc-br' }, chart.layers.marks);
+        [peaks[0], peaks[1]].forEach(p => s('line', { x1: chart.X(p), x2: chart.X(p), y1: chart.Y(y) - 5, y2: chart.Y(y) + 5, class: 'bracket cyc-br' }, chart.layers.marks));
+        chart.text((peaks[0] + peaks[1]) / 2, y, 'One business cycle', 'cyc-br-label', 'middle', -8);
+      }
+      s('line', { x1: chart.X(st.t), x2: chart.X(st.t), y1: chart.Y(0), y2: chart.Y(80), class: 'guide' }, chart.layers.marks);
+      chart.dot(st.t, Y(st.t), 'point');
+      const ph = phase(st.t), info = PH[ph];
+      readout(dl, [['Phase', ph, 'k-wide ' + (ph === 'Recession' || ph === 'Trough' ? 'k-warn' : 'k-good')], ['Output', info[0], 'k-text'], ['Unemployment', info[1], 'k-text']]);
+      note.textContent = info[2];
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     MULTIPLIER — rounds of spending (Topic 11)
+     ====================================================================== */
+  function multiplier(host) {
+    const st = { mpc: 0.75, inj: 100 };
+    const f = frame('The income multiplier, round by round', 'An injection of spending becomes someone’s income; they spend the MPC share of it, which becomes someone else’s income, and so on.', 'lab-multiplier');
+    const chart = Chart(f.plot, { xMax: 11, yMax: 100, xStep: 1, yStep: 20, xLabel: 'Round', yLabel: 'Change in output ($m)', left: 44, ratio: 0.55, label: 'Change in output in each round', xFmt: v => (v >= 1 && v <= 10) ? String(v) : '' });
+    const table = h('div', { class: 'table-wrap' });
+    f.plot.appendChild(table);
+    const mSl = slider({ name: 'mpc', label: 'Marginal propensity to consume (MPC)', min: 0.5, max: 0.9, step: 0.05, value: st.mpc, fmt: v => trim(v, 2), onInput: v => { st.mpc = v; draw(); } });
+    const inj = numField('inj', 'Initial change in spending ($m)', st.inj, v => { st.inj = v; draw(); }, '$', { min: '1' });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(mSl.row, inj, dl, note);
+    function draw() {
+      const c = st.mpc, I = isFinite(st.inj) && st.inj > 0 ? st.inj : 100, mps = 1 - c, k = 1 / mps;
+      Object.assign(chart.opts, { yMax: Math.ceil(I / 20) * 20, yStep: Math.ceil(I / 20) * 20 / 5 });
+      chart.build(f.plot.clientWidth || 520);
+      chart.clear();
+      for (let r = 1; r <= 10; r++) {
+        const v = I * Math.pow(c, r - 1);
+        chart.poly([[r - 0.35, 0], [r + 0.35, 0], [r + 0.35, v], [r - 0.35, v]], 'fill-bar');
+      }
+      const rows = [];
+      let tY = 0, tC = 0, tS = 0;
+      for (let r = 1; r <= 7; r++) {
+        const y = I * Math.pow(c, r - 1);
+        rows.push(`<tr><td>${r}</td><td>${r === 1 ? mn(I) : ''}</td><td>${mn(y)}</td><td>${mn(y * c)}</td><td>${mn(y * mps)}</td></tr>`);
+        tY += y; tC += y * c; tS += y * mps;
+      }
+      const TY = I * k, TC = TY * c, TS = TY * mps;
+      table.innerHTML = `<table class="num"><thead><tr><th>Round</th><th>Initial change</th><th>Change in output</th><th>Change in C (MPC ${trim(c, 2)})</th><th>Change in S (MPS ${trim(mps, 2)})</th></tr></thead><tbody>${rows.join('')}
+        <tr><td>Subtotal 1–7</td><td></td><td>${mn(tY)}</td><td>${mn(tC)}</td><td>${mn(tS)}</td></tr>
+        <tr><td>All later rounds</td><td></td><td>${mn(TY - tY)}</td><td>${mn(TC - tC)}</td><td>${mn(TS - tS)}</td></tr>
+        <tr><td><strong>Total</strong></td><td><strong>${mn(I)}</strong></td><td><strong>${mn(TY)}</strong></td><td><strong>${mn(TC)}</strong></td><td><strong>${mn(TS)}</strong></td></tr></tbody></table>`;
+      readout(dl, [['MPS', trim(mps, 2)], ['Multiplier (1 ÷ MPS)', trim(k, 2), 'k-big'], ['Total change in output', mn(TY), 'k-good'], ['Total saved', mn(TS)]]);
+      note.textContent = `ΔY = (1 ÷ ${trim(mps, 2)}) × ${mn(I)} = ${mn(TY)}. Each round is ${trim(c * 100, 0)}% of the one before, because ${trim(mps * 100, 0)}% leaks into saving. The rounds stop growing once everything has been saved, and total saving equals the original injection.`;
+    }
+    host.appendChild(f.fig);
+    autosize(chart, f.plot, draw);
+  }
+
+  /* ======================================================================
+     FISCAL — the government expenditure and tax multipliers (Topic 12)
+     ====================================================================== */
+  function fiscalCalc(host) {
+    const st = { mpc: 0.75, dG: 50, dT: 0 };
+    const f = frame('Government spending and tax multipliers', 'Enter a change in government spending (G) and/or lump sum taxes (T), in $ billions. Use negative numbers for cuts.', 'lab-calc lab-fiscal');
+    f.body.classList.add('lab-body-calc');
+    const mSl = slider({ name: 'fmpc', label: 'MPC', min: 0.5, max: 0.9, step: 0.05, value: st.mpc, fmt: v => trim(v, 2), onInput: v => { st.mpc = v; calc(); } });
+    const gF = numField('dg', 'Change in G ($b)', st.dG, v => { st.dG = v; calc(); });
+    const tF = numField('dt', 'Change in T ($b)', st.dT, v => { st.dT = v; calc(); });
+    const gIn = gF.querySelector('input'), tIn = tF.querySelector('input');
+    const ex = h('div', { class: 'chips' }, [
+      h('button', { type: 'button', class: 'chip', text: 'G +$50b', onclick: () => { st.dG = 50; st.dT = 0; gIn.value = 50; tIn.value = 0; calc(); } }),
+      h('button', { type: 'button', class: 'chip', text: 'T −$50b', onclick: () => { st.dG = 0; st.dT = -50; gIn.value = 0; tIn.value = -50; calc(); } }),
+      h('button', { type: 'button', class: 'chip', text: 'Both +$50b', onclick: () => { st.dG = 50; st.dT = 50; gIn.value = 50; tIn.value = 50; calc(); } })
+    ]);
+    f.plot.append(mSl.row, h('div', { class: 'el-grid el-grid-2' }, [gF, tF]), h('p', { class: 'panel-label', text: 'Examples' }), ex);
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+    function calc() {
+      const c = st.mpc, mps = 1 - c, dG = isFinite(st.dG) ? st.dG : 0, dT = isFinite(st.dT) ? st.dT : 0;
+      const kG = 1 / mps, kT = -c / mps, yG = kG * dG, yT = kT * dT, dB = dT - dG;
+      readout(dl, [
+        ['Spending multiplier (1 ÷ MPS)', trim(kG, 2)], ['Tax multiplier (−MPC ÷ MPS)', '−' + trim(-kT, 2)],
+        ['ΔY from G', bn(yG)], ['ΔY from T', bn(yT)], ['Total ΔY', bn(yG + yT), 'k-big'],
+        ['Change in budget (ΔT − ΔG)', bn(dB), dB < 0 ? 'k-hot' : dB > 0 ? 'k-good' : '']
+      ]);
+      const parts = [];
+      if (dG) parts.push(`ΔY = (1 ÷ ${trim(mps, 2)}) × ${bn(dG)} = ${bn(yG)}`);
+      if (dT) parts.push(`ΔY = (−${trim(c, 2)} ÷ ${trim(mps, 2)}) × ${bn(dT)} = ${bn(yT)}`);
+      let txt = parts.length ? parts.join('; ') + '.' : 'Enter a change in G or T.';
+      if (dG && dT && dG === dT) txt += ` Raising G and T by the same amount still raises output by ${bn(yG + yT)}, because the spending counts in full while only the MPC share of the tax is taken out of spending.`;
+      else if (dT && !dG) txt += ' A tax change works through disposable income and consumption, so its multiplier is smaller than the spending multiplier.';
+      if (dB) txt += ` Starting from a balanced budget, this moves the budget toward a ${dB < 0 ? 'deficit' : 'surplus'} of ${bn(Math.abs(dB))}.`;
+      note.textContent = txt;
+    }
+    calc();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     CREDIT — the credit creation process and the money multiplier (Topic 13)
+     ====================================================================== */
+  function credit(host) {
+    const st = { er: 1000, rrr: 20 };
+    const f = frame('Credit creation calculator', 'Bank A lends its excess reserves. Each loan is spent and re-deposited in the next bank, which keeps the required reserves and lends the rest.', 'lab-calc lab-credit');
+    f.body.classList.add('lab-body-calc');
+    const rSl = slider({ name: 'rrr', label: 'Reserve requirement ratio (RRR)', min: 5, max: 50, step: 5, value: st.rrr, fmt: v => v + '%', onInput: v => { st.rrr = v; calc(); } });
+    const eF = numField('er', 'Bank A’s initial excess reserves', st.er, v => { st.er = v; calc(); }, '$', { min: '1' });
+    const table = h('div', { class: 'table-wrap' });
+    f.plot.append(rSl.row, eF, table);
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(dl, note);
+    function calc() {
+      const r = st.rrr / 100, ER = isFinite(st.er) && st.er > 0 ? st.er : 1000, mm = 1 / r, dMS = ER * mm;
+      const rows = [`<tr><td>A</td><td></td><td></td><td>${money(ER)}</td></tr>`];
+      let dep = ER, sumD = 0, sumR = 0;
+      ['B', 'C', 'D'].forEach(b => { rows.push(`<tr><td>${b}</td><td>${money(dep)}</td><td>${money(dep * r)}</td><td>${money(dep * (1 - r))}</td></tr>`); sumD += dep; sumR += dep * r; dep *= (1 - r); });
+      rows.push(`<tr><td>All others</td><td>${money(dMS - sumD)}</td><td>${money(ER - sumR)}</td><td></td></tr>`);
+      rows.push(`<tr><td><strong>Total</strong></td><td><strong>${money(dMS)}</strong></td><td><strong>${money(ER)}</strong></td><td></td></tr>`);
+      table.innerHTML = `<table class="num"><thead><tr><th>Bank</th><th>Deposit</th><th>Required reserves</th><th>Excess reserves (lent)</th></tr></thead><tbody>${rows.join('')}</tbody></table>`;
+      readout(dl, [['Money multiplier (1 ÷ RRR)', trim(mm, 2), 'k-big'], ['Increase in money supply', money(dMS), 'k-good']]);
+      note.textContent = `ΔMS = IER × (1 ÷ RRR) = ${money(ER)} × ${trim(mm, 2)} = ${money(dMS)}. A lower RRR means banks keep less and lend more at each step, so the multiplier and the money supply grow.`;
+    }
+    calc();
+    host.appendChild(f.fig);
+  }
+
+  /* ======================================================================
+     MONEYMARKET — MAS tools → money supply → interest rate → C and I → AD → output (Topic 13)
+     Money demand: r = 10 − 0.05M. AD shifts by 12 for each 1-point fall in r.
+     ====================================================================== */
+  const MONEY_TOOLS = [
+    { label: 'Lower the RRR', d: 20, why: 'Banks have more excess reserves and a bigger money multiplier, so they lend more.' },
+    { label: 'Raise the RRR', d: -20, why: 'Some excess reserves become required reserves and the money multiplier shrinks, so banks lend less.' },
+    { label: 'Lower the discount rate', d: 20, why: 'Borrowing reserves from the MAS is cheaper, so banks borrow and lend more.' },
+    { label: 'Raise the discount rate', d: -20, why: 'Borrowing reserves from the MAS costs more, so banks lend less.' },
+    { label: 'Buy government securities', d: 20, why: 'The MAS pays for the securities, adding to bank reserves, so banks lend more.' },
+    { label: 'Sell government securities', d: -20, why: 'Buyers pay with bank deposits, draining bank reserves, so banks lend less.' },
+    { label: 'MAS sells S$', d: 20, why: 'More Singapore dollars go into circulation.' },
+    { label: 'MAS buys S$', d: -20, why: 'The MAS takes Singapore dollars out of circulation.' }
+  ];
+  function moneymarket(host) {
+    const st = { M: 100, sit: -15, tool: null };
+    const f = frame('From the money market to output', 'Pick the economy’s situation, then use one of the MAS’s tools. Follow the chain from the money supply to the interest rate, AD and output.', 'lab-moneymarket');
+    const top = h('div', { class: 'plot-stack' }), bot = h('div', { class: 'plot-stack' });
+    f.plot.append(top, bot);
+    const c1 = Chart(top, { xMax: 200, yMax: 10, xStep: 40, yStep: 2, xLabel: 'Quantity of money ($b)', yLabel: 'Interest rate (%)', yFmt: v => v + '%', left: 44, ratio: 0.5, maxH: 280, label: 'Money market' });
+    const c2 = Chart(bot, { xMax: 100, yMax: 200, xStep: 20, yStep: 40, xLabel: 'Output (real GDP)', yLabel: 'Price level', left: 44, ratio: 0.5, maxH: 280, label: 'AD-AS diagram' });
+    f.plot.appendChild(legend([['supply', 'Money supply (SM) / AS'], ['demand', 'Money demand (DM) / AD'], ['yf', 'Full employment (Yf)']]));
+    const sitSeg = segmented('Situation', [[-15, 'Recession'], [0, 'Full employment'], [15, 'Inflationary']], st.sit, v => { st.sit = v; draw(); });
+    const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Monetary tools' });
+    const btns = MONEY_TOOLS.map((t, i) => {
+      const b = h('button', { type: 'button', class: 'chip', text: t.label });
+      b.addEventListener('click', () => { st.M = clamp(st.M + t.d, 40, 160); st.tool = i; draw(); });
+      chips.appendChild(b);
+      return b;
+    });
+    const reset = h('button', { type: 'button', class: 'btn btn-quiet', text: 'Reset the money supply' });
+    reset.addEventListener('click', () => { st.M = 100; st.tool = null; draw(); });
+    const dl = h('dl', { class: 'readout' });
+    const note = h('p', { class: 'lab-note', 'aria-live': 'polite' });
+    f.panel.append(h('p', { class: 'panel-label', text: 'Situation' }), sitSeg.el, h('p', { class: 'panel-label', text: 'MAS tools' }), chips, dl, note, reset);
+    function draw() {
+      c1.clear(); c2.clear();
+      const r = 10 - 0.05 * st.M, r0 = 5;
+      if (st.M !== 100) c1.vline(100, 'curve supply ghost');
+      c1.line(10, -0.05, 'curve demand', 'DM', 'end');
+      c1.vline(st.M, 'curve supply', st.M === 100 ? 'SM' : 'SM₁');
+      c1.guides(st.M, r, trim(st.M, 0), trim(r, 1) + '%');
+      c1.dot(st.M, r, 'eq');
+      if (st.M !== 100) c1.arrow(100, r0, st.M, r);
+      const adShift = st.sit + 12 * (r0 - r);
+      const a = 200 + 2 * adShift, Yv = a / 4, Pl = a - 2 * Yv, yf = 50, gap = Yv - yf;
+      const aBase = 200 + 2 * st.sit;
+      if (st.M !== 100) c2.line(aBase, -2, 'curve demand ghost');
+      c2.vline(yf, 'curve yf', 'Yf');
+      c2.line(a, -2, 'curve demand', st.M !== 100 ? 'AD₁' : 'AD', 'end');
+      c2.line(0, 2, 'curve supply', 'AS', 'end');
+      c2.guides(Yv, Pl, trim(Yv, 1), trim(Pl, 0));
+      c2.dot(Yv, Pl, 'eq');
+      if (st.M !== 100) c2.arrow(aBase / 4, aBase / 2, Yv, Pl);
+      const sit = Math.abs(gap) < 0.5 ? ['At full employment', 'k-good'] : gap < 0 ? ['Recessionary situation', 'k-warn'] : ['Inflationary situation', 'k-hot'];
+      readout(dl, [['Money supply', '$' + trim(st.M, 0) + 'b'], ['Interest rate', trim(r, 1) + '%'], ['Output (Ye)', trim(Yv, 1)], ['Full employment (Yf)', '50'], ['Situation', sit[0], 'k-wide ' + sit[1]]]);
+      let txt = '';
+      if (st.tool != null) {
+        const t = MONEY_TOOLS[st.tool], up = t.d > 0;
+        txt = `${t.label}: ${t.why} Money supply ${up ? '↑ (SM shifts right)' : '↓ (SM shifts left)'} → interest rate ${up ? 'falls' : 'rises'} to ${trim(r, 1)}% → borrowing is ${up ? 'cheaper' : 'dearer'}, so C and I ${up ? 'rise' : 'fall'} → AD ${up ? 'shifts right' : 'shifts left'} → output ${up ? 'rises' : 'falls'} by a multiple. `;
+        if (st.M === 160 || st.M === 40) txt += 'That’s as far as this model goes. ';
+      }
+      txt += Math.abs(gap) < 0.5 ? 'Output is at full employment.' : gap < 0 ? `Output is ${trim(-gap, 1)} below Yf: an expansionary policy (more money, lower interest rates) would help.` : `Output is ${trim(gap, 1)} above Yf: a contractionary policy (less money, higher interest rates) would cool the economy.`;
+      note.textContent = txt;
+    }
+    host.appendChild(f.fig);
+    autosize2(c1, top, c2, bot, draw);
+  }
+
   /* ---------- registry ---------- */
   const REGISTRY = {
-    market, ppf, advantage, inflation, adas, shifter, schedule, production, costs, lrac, structures,
-    elasticity: (node, preset) => preset === 'module' ? elasticityModule(node) : elasticity(node)
+    market, ppf, advantage, adas, shifter, schedule, production, costs, lrac, structures,
+    profitmax, stall, labour, gdp, cycle, multiplier, credit, moneymarket, fiscal: fiscalCalc,
+    elasticity: (node, preset) => preset === 'module' ? elasticityModule(node) : elasticity(node),
+    inflation: (node, preset) => preset === 'basket' ? basket(node) : inflation(node)
   };
 
   window.ECON = window.ECON || {};
@@ -1586,7 +2166,13 @@
     mountAll(root) {
       root.querySelectorAll('[data-widget]').forEach(node => {
         const fn = REGISTRY[node.dataset.widget];
-        if (!fn || node.dataset.mounted) return;
+        if (node.dataset.mounted) return;
+        if (!fn) {
+          console.warn('Unknown widget:', node.dataset.widget);
+          node.dataset.mounted = '1';
+          node.textContent = 'This interactive is missing. Try reloading the page.';
+          return;
+        }
         node.dataset.mounted = '1';
         node.classList.add('widget-host');
         try { fn(node, node.dataset.preset); }

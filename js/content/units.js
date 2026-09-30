@@ -1,4 +1,4 @@
-/* Course structure. The module unit ('m') follows the course notes (module-a.js, module-b.js);
+/* Course structure. The module units ('m' and 'm2') follow the course notes (module-a.js … module-d.js);
    the other units are the wider course (u1.js … u5.js). */
 window.ECON = window.ECON || {};
 
@@ -7,7 +7,13 @@ ECON.units = [
     id: 'm',
     module: true,
     title: 'Microeconomics',
-    blurb: 'Basic concepts, demand, supply, market equilibrium, elasticity, production and costs, and market structure.'
+    blurb: 'Basic concepts, demand, supply, market equilibrium, elasticity, production and costs, market structure, and profit maximisation.'
+  },
+  {
+    id: 'm2',
+    module: true,
+    title: 'Macroeconomics',
+    blurb: 'Unemployment and inflation, GDP and business cycles, aggregate demand and supply, fiscal policy and monetary policy.'
   },
   {
     id: 'u1',

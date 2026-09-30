@@ -23,7 +23,7 @@ ECON.lessons.push(
     <tr><td>Example</td><td>How do you decide how to spend your money?</td><td>How much is spent in total across the country?</td></tr>
   </tbody>
 </table></div>
-<p>All seven topics in this module are microeconomics.</p>
+<p>Topics 1 to 8 of this module are microeconomics; Topics 9 to 13 are macroeconomics.</p>
 
 <h2>1.2 The basic economic problem: scarcity</h2>
 <p>Humans have <strong>unlimited wants</strong> but <strong>limited resources</strong>. Because of this, we can never satisfy all our wants. That inability is called <strong>scarcity</strong>, and it forces us to choose among the alternatives available.</p>

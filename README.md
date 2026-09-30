@@ -1,4 +1,4 @@
-# Marginal Notes
+# Ethan Economics
 
 A self-paced economics course that runs in the browser. It has two tracks:
 

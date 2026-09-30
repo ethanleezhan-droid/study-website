@@ -1,4 +1,4 @@
-/* Marginal Notes: routing, views, quizzes, flashcards and progress. */
+/* Ethan Economics: routing, views, quizzes, flashcards and progress. */
 (function () {
   const units = ECON.units;
   const lessons = ECON.lessons;
@@ -157,7 +157,7 @@
     return h.startsWith('lesson-') ? byId[h.slice(7)] || null : null;
   }
 
-  function setTitle(t) { document.title = t ? `${t} · Marginal Notes` : 'Marginal Notes'; }
+  function setTitle(t) { document.title = t ? `${t} · Ethan Economics` : 'Ethan Economics'; }
 
   /* ---------- home ---------- */
   function lessonRows(ls) {

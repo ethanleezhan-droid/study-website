@@ -217,6 +217,35 @@
     return top;
   }
 
+  /* The section of one lesson that best explains a piece of text, e.g. a quiz question with
+     its answer and explanation. Returns {target, where} for ECON.app.openSource, or null. */
+  function locate(lessonId, text) {
+    const idx = index();
+    const qt = [...new Set(tokens(text))];
+    const qb = bigrams(tokens(text));
+    const N = idx.chunks.length, K1 = 1.2, B = 0.75;
+    let best = null, bestS = 0;
+    idx.chunks.forEach(c => {
+      if (c.lesson.id !== lessonId || c.kind !== 'section') return;
+      let s = 0;
+      qt.forEach(t => {
+        const f = c.tf.get(t);
+        if (!f) return;
+        const d = idx.df.get(t);
+        s += Math.log(1 + (N - d + 0.5) / (d + 0.5)) * (f * (K1 + 1)) / (f + K1 * (1 - B + B * c.len / idx.avg));
+      });
+      qb.forEach(b => { if (c.bi.has(b)) s += 1.5; });
+      if (s > bestS) { bestS = s; best = c; }
+    });
+    return best ? { target: best.target, where: best.where.split(' · ').slice(1).join(' · ') } : null;
+  }
+
+  /* The name of a lesson's heading by its position, e.g. "5.3 Income elasticity of demand". */
+  function heading(lessonId, i) {
+    const c = index().chunks.find(x => x.lesson.id === lessonId && x.target.kind === 'heading' && x.target.index === i);
+    return c ? c.where.split(' · ').slice(1).join(' · ') : null;
+  }
+
   /* The lines of a chunk that best match the question, with matching words marked. */
   function excerpt(c, question, max = 420) {
     const q = new Set(tokens(question));
@@ -659,5 +688,5 @@ How to answer:
   })();
   renderMode();
 
-  ECON.helper = { open, close, ask, search, tokens, stem, md, get mode() { return mode; } };
+  ECON.helper = { open, close, ask, search, locate, heading, tokens, stem, md, get mode() { return mode; } };
 })();

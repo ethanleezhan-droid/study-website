@@ -216,6 +216,7 @@ ECON.lessons.push(
       },
       {
         q: 'According to your notes, which formula should you use for income elasticity of demand?',
+        ref: 6, // 5.3 Income elasticity of demand
         options: [
           'The midpoint formula',
           'The simple formula, using the old values as the base',

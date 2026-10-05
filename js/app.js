@@ -13,8 +13,14 @@
     else { l.n = ++lessonN; l.label = 'Lesson ' + l.n; }
   });
   const moduleLessons = lessons.filter(l => l.module);
+  const TOPIC_ICONS = { 'm-basic': '⚖️', 'm-demand': '🛒', 'm-supply': '🏭', 'm-equilibrium': '🎯', 'm-elasticity': '🧮', 'm-costs': '⚙️', 'm-structures': '🏢',
+    'm-profit': '💰', 'm-unemployment': '👷', 'm-gdp': '📊', 'm-adas': '📈', 'm-fiscal': '🏛️', 'm-monetary': '🏦' };
+  const TOPIC_HUES = [152, 212, 24, 280, 45, 190, 330, 100, 4, 230, 170, 260, 38];
+  lessons.forEach(l => { l.icon = TOPIC_ICONS[l.id] || '📘'; });
   const introLessons = lessons.filter(l => !l.module);
   const moduleUnits = units.filter(u => u.module);
+  moduleLessons.forEach((l, i) => { l.hue = TOPIC_HUES[i % TOPIC_HUES.length]; });
+  introLessons.forEach(l => { l.hue = 152; });
   const byId = Object.fromEntries(lessons.map(l => [l.id, l]));
   const lessonsIn = u => lessons.filter(l => l.unit === u.id);
   const topicRange = ls => ls.length === 1 ? `Topic ${ls[0].n}` : `Topics ${ls[0].n}–${ls[ls.length - 1].n}`;
@@ -42,7 +48,7 @@
 
   /* ---------- progress storage (per browser) ---------- */
   const KEY = 'marginal-notes-v1';
-  const blank = () => ({ done: {}, quiz: {}, cards: {}, exams: {} });
+  const blank = () => ({ done: {}, quiz: {}, cards: {}, exams: {}, view: 'pictures' });
   let data = blank();
   try {
     const raw = localStorage.getItem(KEY);
@@ -77,8 +83,60 @@
     const order = q.options.every(isNumeric)
       ? idx.sort((a, b) => numValue(q.options[a]) - numValue(q.options[b]))
       : shuffle(idx);
-    return { q: q.q, why: q.why, options: order.map(i => q.options[i]), answer: order.indexOf(q.answer) };
+    return { q: q.q, why: q.why, ref: q.ref, blank: q.blank, sec: q.sec, kind: q.kind, options: order.map(i => q.options[i]), answer: order.indexOf(q.answer) };
   }
+  const plainText = html => { const t = document.createElement('template'); t.innerHTML = html; return t.content.textContent.replace(/\s+/g, ' ').trim(); };
+
+  /* Up to n extra questions made from the notes' blanks: pick the right answer for a blank
+     from four answers that appear elsewhere in the same topic's notes. */
+  function blankQuestions(l, n) {
+    if (!l.blanks) return [];
+    const rows = l.blanks.map(([sec, p, a], i) => ({ sec: plainText(sec), p: plainText(p), a: plainText(a), i }))
+      .filter(r => r.a.length >= 2 && r.a.length <= 80 && r.p.length >= 6);
+    const answers = [...new Set(rows.map(r => r.a))];
+    if (answers.length < 4) return [];
+    return shuffle(rows).filter((r, k, arr) => arr.findIndex(x => x.a === r.a) === k).slice(0, n).map(r => {
+      const wrong = shuffle(answers.filter(a => a !== r.a)).slice(0, 3);
+      return {
+        q: `Fill in the blank from your notes (${r.sec}): ${r.p}`,
+        options: [r.a, ...wrong], answer: 0,
+        why: `Your notes, section ${r.sec}: ${r.p} → ${r.a}.`,
+        blank: r.i, sec: r.sec, kind: 'blank'
+      };
+    });
+  }
+
+  /* Where a question's answer is in the notes: {target, where} for openSource, or null. */
+  function noteRef(l, q) {
+    const H = ECON.helper;
+    if (q.blank != null) return { target: { lessonId: l.id, kind: 'blank', index: q.blank }, where: `Fill in your notes · ${q.sec}` };
+    if (q.ref != null) return { target: { lessonId: l.id, kind: 'heading', index: q.ref }, where: (H && H.heading && H.heading(l.id, q.ref)) || l.title };
+    if (!H || !H.locate) return null;
+    try { return H.locate(l.id, `${q.q} ${q.options[q.answer]} ${q.why}`); } catch (e) { return null; }
+  }
+  function noteRefHtml(l, ref) {
+    if (!ref) return '';
+    const label = (l.module ? `Topic ${l.n}` : `Lesson ${l.n}`) + ' · ' + ref.where;
+    return `<div class="note-ref"><span class="note-ref-ico" aria-hidden="true">📍</span><span class="note-ref-txt"><span class="note-ref-k">${l.module ? 'Where this is in your notes' : 'Where this is in the lesson'}</span><span class="note-ref-w">${esc(label)}</span></span><button type="button" class="btn btn-small btn-primary" data-goto="1">Show me</button></div>`;
+  }
+
+  /* After jumping from a quiz to the notes, a small button brings the student back. */
+  let returnPill = null;
+  function showReturn(el, label) {
+    hideReturn();
+    returnPill = document.createElement('button');
+    returnPill.type = 'button';
+    returnPill.className = 'return-pill';
+    returnPill.textContent = '↩ ' + (label || 'Back to the quiz');
+    returnPill.addEventListener('click', () => {
+      el.scrollIntoView({ behavior: smooth(), block: 'center' });
+      const f = el.querySelector('button:not([disabled])') || el;
+      f.focus({ preventScroll: true });
+      hideReturn();
+    });
+    document.body.appendChild(returnPill);
+  }
+  function hideReturn() { if (returnPill) { returnPill.remove(); returnPill = null; } }
   const LETTERS = 'ABCDEFG';
   const smooth = () => (matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth');
 
@@ -103,6 +161,7 @@
   function route() {
     const hash = decodeURIComponent(location.hash.replace(/^#/, ''));
     if (cleanup) { cleanup(); cleanup = null; }
+    hideReturn();
     ECON.widgets.resetIds();
     let view = 'home';
     if (hash.startsWith('lesson-') && byId[hash.slice(7)]) { view = 'lesson'; renderLesson(byId[hash.slice(7)]); }
@@ -132,15 +191,18 @@
      section such as the quiz. */
   function scrollToTarget(t) {
     let el = null;
-    if (t.kind === 'heading') el = main.querySelectorAll('.prose > h2, .prose > h3')[t.index];
+    if (t.kind === 'heading') {
+      el = main.querySelectorAll('.prose > h2, .prose > h3')[t.index];
+      for (let n = el && el.nextElementSibling; n && !/^H[23]$/.test(n.tagName); n = n.nextElementSibling) if (n.matches('details.more')) n.open = true;
+    }
     else if (t.kind === 'term') el = main.querySelectorAll('.term-list > div')[t.index];
     else if (t.kind === 'blank') el = main.querySelectorAll('.blanks-table tbody tr')[t.index];
     else if (t.kind === 'review') { el = main.querySelectorAll('.review .rv')[t.index]; if (el) el.open = true; }
     else if (t.kind === 'section') el = main.querySelector(t.id);
     else if (t.kind === 'top') el = main.querySelector('.lesson-head');
     if (!el) return;
+    main.querySelectorAll('.flash').forEach(f => f.classList.remove('flash'));
     el.scrollIntoView({ behavior: smooth(), block: 'start' });
-    el.classList.remove('flash');
     void el.offsetWidth;
     el.classList.add('flash');
     el.setAttribute('tabindex', '-1');
@@ -169,6 +231,19 @@
             ${statusChip(l)}
           </a></li>`).join('');
   }
+  function topicCards(ls) {
+    return `<ol class="topic-grid">${ls.map(l => {
+      const q = data.quiz[l.id], done = !!data.done[l.id];
+      return `
+          <li><a class="topic-card${done ? ' is-done' : ''}" href="#lesson-${l.id}" style="--hue:${l.hue}">
+            <span class="tc-top"><span class="tc-ico" aria-hidden="true">${l.icon}</span><span class="tc-n">Topic ${l.n}</span>${done ? '<span class="tc-done" aria-label="complete">✓</span>' : ''}</span>
+            <span class="tc-title">${esc(l.title)}</span>
+            <span class="tc-sum">${esc(l.summary)}</span>
+            <span class="tc-bar" aria-hidden="true"><span style="width:${done ? 100 : q ? Math.round(q.best / q.total * 100) : 0}%"></span></span>
+            <span class="tc-foot"><span>${l.minutes} min</span><span>${q ? `🎯 Best ${q.best}/${q.total}` : '🎯 Pop quiz'}</span></span>
+          </a></li>`;
+    }).join('')}</ol>`;
+  }
   function progressLine(ls) {
     const d = doneIn(ls);
     return `<p class="unit-prog"><span class="mini-bar" aria-hidden="true"><span style="width:${d / ls.length * 100}%"></span></span>${d} of ${ls.length} complete</p>`;
@@ -189,11 +264,11 @@
         <section class="unit unit-module" aria-labelledby="unit-${u.id}">
           <header class="unit-head">
             <p class="unit-num">${topicRange(ls)}</p>
-            <h3 id="unit-${u.id}">${esc(u.title)}</h3>
+            <h3 id="unit-${u.id}"><span class="unit-ico" aria-hidden="true">${u.id === 'm' ? '🔬' : '🌏'}</span>${esc(u.title)}</h3>
             <p class="unit-blurb">${esc(u.blurb)}</p>
             ${progressLine(ls)}
           </header>
-          <ol class="lesson-list">${lessonRows(ls)}</ol>
+          ${topicCards(ls)}
         </section>`;
     }).join('');
     const unitHtml = units.filter(u => !u.module).map(u => {
@@ -215,24 +290,37 @@
     <div class="wrap">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Your economics module, ${moduleRange}</p>
-          <h1>Economics is the study of choices made under scarcity.</h1>
-          <p class="lede">Everything in your course notes, taught step by step with the same section numbers and examples. Each topic has graphs you can move, answers for the blanks in your notes, the “Do you know?” questions, and a quiz.</p>
-          <div class="actions">${primary}<a class="btn" href="#labs">Open the labs</a></div>
-          <p class="hero-progress">${nMod === 0 ? 'Your progress is saved in this browser as you go.' : `You’ve completed ${nMod} of ${moduleLessons.length} topics.`}</p>
+          <p class="hero-chip"><span aria-hidden="true">📚</span> Your economics module · ${moduleRange}</p>
+          <h1>Economics, <span class="hl">explained in pictures</span>.</h1>
+          <p class="lede">Every topic in your notes, with diagrams, graphs you can move, and a pop quiz that sends you straight back to the part of your notes you missed.</p>
+          <div class="actions">${primary}<a class="btn btn-ghost" href="#labs">Open the labs</a></div>
+          <ul class="hero-stats">
+            <li><strong>${moduleLessons.length}</strong><span>topics</span></li>
+            <li><strong>${Object.values(ECON.visualData || {}).reduce((n, v) => n + v.length, 0)}</strong><span>pictures and graphs</span></li>
+            <li><strong>${nMod}/${moduleLessons.length}</strong><span>completed</span></li>
+          </ul>
+          ${next && nMod > 0 ? `<a class="continue" href="#lesson-${next.id}" style="--hue:${next.hue}"><span class="continue-ico" aria-hidden="true">${next.icon}</span><span class="continue-txt"><span class="continue-k">Continue where you left off</span><span class="continue-t">${next.label}: ${esc(next.title)}</span></span><span class="continue-go" aria-hidden="true">→</span></a>` : ''}
         </div>
         <div class="hero-demo">
-          <p class="demo-label">A live market</p>
+          <p class="demo-label"><span class="live-dot" aria-hidden="true"></span> Try it: a live market</p>
           <div data-widget="market" data-preset="hero"></div>
         </div>
       </section>
+    </div>
+    <div class="wrap">
+      <ul class="features" aria-label="What’s inside">
+        <li><span class="ft-ico" aria-hidden="true">🖼️</span><span><strong>See it</strong> Diagrams and moving graphs for every topic</span></li>
+        <li><span class="ft-ico" aria-hidden="true">🎯</span><span><strong>Pop quizzes</strong> Quick questions at the end of each topic</span></li>
+        <li><span class="ft-ico" aria-hidden="true">📍</span><span><strong>Learn from mistakes</strong> A wrong answer takes you to that part of your notes</span></li>
+        <li><span class="ft-ico" aria-hidden="true">💬</span><span><strong>Ask</strong> The study helper answers from your notes</span></li>
+      </ul>
     </div>
     <canvas class="guilloche" aria-hidden="true"></canvas>
     <div class="wrap">
       <section class="course" aria-labelledby="module-h">
         <div class="section-head">
           <h2 id="module-h">Your module</h2>
-          <p>The ${moduleLessons.length} topics in your notes, in order. Pass each topic’s quiz to complete it.</p>
+          <p>The ${moduleLessons.length} topics in your notes, in order. Pass each topic’s pop quiz to complete it.</p>
         </div>
         ${moduleHtml}
       </section>
@@ -308,6 +396,41 @@
     return html;
   }
 
+  /* Picture view: in each section keep the heading, pictures, graphs, key boxes and formulas,
+     and fold the longer explanation into a "Read the full explanation" button. Sections with
+     no picture keep their first paragraph. Nothing is removed; Full notes shows it all. */
+  const isHead = el => /^H[23]$/.test(el.tagName);
+  const keeps = el => isHead(el) || el.matches('.vis, [data-widget], .widget-host, .formula, .note.key, .note.pitfall, details.more');
+  function condense(prose) {
+    if (prose.querySelector(':scope > details.more')) return;
+    [...prose.children].forEach((el, i) => { if (!el.dataset.ord) el.dataset.ord = String(i); });
+    const sections = [[]];
+    [...prose.children].forEach(el => { if (isHead(el)) sections.push([el]); else sections[sections.length - 1].push(el); });
+    sections.forEach(sec => {
+      const body = sec.length && isHead(sec[0]) ? sec.slice(1) : sec;
+      const pictured = body.some(el => el.matches('.vis, [data-widget], .widget-host'));
+      let fold = body.filter(el => !keeps(el));
+      if (!pictured && fold.length && fold[0].tagName === 'P') fold = fold.slice(1);
+      if (!fold.length) return;
+      const words = fold.reduce((n, el) => n + el.textContent.trim().split(/\s+/).length, 0);
+      if (words < 25) return;
+      const d = document.createElement('details');
+      d.className = 'more';
+      d.innerHTML = `<summary><span class="more-ico" aria-hidden="true">📖</span><span>Read the full explanation</span><span class="more-n">${words} words</span></summary><div class="more-body"></div>`;
+      const last = body[body.length - 1];
+      last.after(d);
+      fold.forEach(el => d.lastElementChild.appendChild(el));
+    });
+  }
+  function expandAll(prose) {
+    prose.querySelectorAll(':scope > details.more').forEach(d => {
+      [...d.lastElementChild.children].forEach(el => d.before(el));
+      d.remove();
+    });
+    /* back into the original reading order */
+    [...prose.children].filter(el => el.dataset.ord).sort((a, b) => a.dataset.ord - b.dataset.ord).forEach(el => prose.appendChild(el));
+  }
+
   function renderLesson(l) {
     setTitle(l.title);
     const u = unitById[l.unit];
@@ -318,16 +441,17 @@
     main.innerHTML = `
     <div class="wrap lesson-layout">
       <aside class="syllabus" aria-label="Course contents">${syllabusHtml(l)}</aside>
-      <article class="lesson">
+      <article class="lesson" style="--hue:${l.hue}">
         <details class="syllabus-mobile">
           <summary>All topics and lessons</summary>
           ${syllabusHtml(l)}
         </details>
         <header class="lesson-head">
           <p class="eyebrow">${eyebrow}</p>
-          <h1>${esc(l.title)}</h1>
+          <h1>${l.module ? `<span class="lh-ico" aria-hidden="true">${l.icon}</span>` : ''}${esc(l.title)}</h1>
           <p class="lede">${esc(l.summary)}</p>
           <div class="meta"><span>${l.minutes} min read</span>${l.module ? `<span class="from-notes">Matches Topic ${l.n} in your notes</span>` : ''}<span id="lesson-status">${statusChip(l)}</span>
+            <span class="view-toggle" role="radiogroup" aria-label="How much text to show"><button type="button" role="radio" data-view="pictures">🖼️ Picture view</button><button type="button" role="radio" data-view="full">📖 Full notes</button></span>
             <button type="button" class="btn btn-quiet btn-small" id="mark-done"></button></div>
         </header>
         <nav class="toc" id="toc" aria-label="On this page" hidden></nav>
@@ -365,6 +489,16 @@
     refreshStatus();
     wireReview();
     wireBlanks();
+    const prose = main.querySelector('.prose');
+    if (ECON.visual) ECON.visual.place(prose, l.id);
+    const viewBtns = [...main.querySelectorAll('[data-view]')];
+    const setView = v => {
+      data.view = v;
+      viewBtns.forEach(b => { b.setAttribute('aria-checked', String(b.dataset.view === v)); b.tabIndex = b.dataset.view === v ? 0 : -1; });
+      if (v === 'pictures') condense(prose); else expandAll(prose);
+    };
+    viewBtns.forEach(b => b.addEventListener('click', () => { setView(b.dataset.view); save(); }));
+    setView(data.view === 'full' ? 'full' : 'pictures');
     lessonQuiz(main.querySelector('#quiz-host'), l, next, refreshStatus);
     buildToc();
   }
@@ -433,71 +567,126 @@
     items.forEach(d => d.addEventListener('toggle', sync));
   }
 
-  /* "On this page" jump list, built from the lesson's section headings. */
+  /* A roadmap of the lesson: one numbered step per section, then the key terms, blanks,
+     revision questions and pop quiz. The step being read is highlighted. */
   function buildToc() {
     const toc = main.querySelector('#toc');
-    const heads = [...main.querySelectorAll('.prose > h2, .lesson > section > .terms-head > h2, .lesson > section > h2, #quiz-host h2')];
-    if (heads.length < 5) return;
-    heads.forEach((hd, i) => { if (!hd.id) hd.id = 'sec-' + i; });
-    toc.innerHTML = `<p class="toc-label">On this page</p><div class="chips">${heads.map(hd => `<button type="button" class="chip" data-target="${hd.id}">${esc(hd.textContent)}</button>`).join('')}</div>`;
+    const secs = [...main.querySelectorAll('.prose > h2')];
+    const extras = [['#terms-h', '🔑'], ['#blanks-h', '✏️'], ['#review-h', '❓'], ['#quiz-h', '🎯']]
+      .map(([sel, ico]) => [main.querySelector(sel), ico]).filter(([h]) => h);
+    if (secs.length + extras.length < 4) return;
+    const steps = secs.map((h, i) => {
+      const m = h.textContent.match(/^(\d+(?:\.\d+)*)\s+(.*)$/);
+      return { h, badge: m ? m[1] : String(i + 1), t: m ? m[2] : h.textContent };
+    }).concat(extras.map(([h, ico]) => ({ h, badge: ico, t: h.textContent, extra: true })));
+    steps.forEach((st, i) => { if (!st.h.id) st.h.id = 'sec-' + i; });
+    toc.innerHTML = `<p class="toc-label">Your route through this ${main.querySelector('.from-notes') ? 'topic' : 'lesson'}</p>
+      <ol class="roadmap">${steps.map(st => `<li><button type="button" class="rm-step${st.extra ? ' is-extra' : ''}" data-target="${st.h.id}"><span class="rm-n">${esc(st.badge)}</span><span class="rm-t">${esc(st.t)}</span></button></li>`).join('')}</ol>`;
     toc.hidden = false;
-    toc.querySelectorAll('[data-target]').forEach(b => b.addEventListener('click', () => {
+    const btns = [...toc.querySelectorAll('[data-target]')];
+    btns.forEach(b => b.addEventListener('click', () => {
       const t = document.getElementById(b.dataset.target);
       if (!t) return;
       t.scrollIntoView({ behavior: smooth(), block: 'start' });
       t.setAttribute('tabindex', '-1');
       t.focus({ preventScroll: true });
     }));
+    if ('IntersectionObserver' in window) {
+      const io = new IntersectionObserver(entries => {
+        entries.forEach(e => {
+          if (!e.isIntersecting) return;
+          const k = steps.findIndex(st => st.h === e.target);
+          btns.forEach((b, j) => b.classList.toggle('is-here', j === k));
+        });
+      }, { rootMargin: '-15% 0px -70% 0px' });
+      steps.forEach(st => io.observe(st.h));
+      const prev = cleanup;
+      cleanup = () => { io.disconnect(); if (prev) prev(); };
+    }
   }
 
+  /* The pop quiz at the end of each topic: one question at a time. A wrong answer shows
+     where the answer is in the notes, with a button that jumps there (and one to come back). */
   function lessonQuiz(host, l, next, onChange) {
-    const quiz = l.quiz.map(prepare);
-    const total = quiz.length, need = passMark(total);
-    let answered = 0, correct = 0;
+    const qs = shuffle(l.quiz.concat(blankQuestions(l, l.module ? 2 : 0))).map(prepare);
+    const total = qs.length, need = passMark(total), unit = l.module ? 'topic' : 'lesson';
+    const results = [];
+    let i = 0;
     host.innerHTML = `
-      <section class="quiz" aria-labelledby="quiz-h">
+      <section class="quiz pop" aria-labelledby="quiz-h">
         <div class="quiz-head">
-          <h2 id="quiz-h">Check your understanding</h2>
-          <p>${total} questions. Get ${need} right to complete the ${l.module ? 'topic' : 'lesson'}. Each answer is explained once you choose.</p>
+          <p class="pop-badge"><span aria-hidden="true">🎯</span> Pop quiz</p>
+          <h2 id="quiz-h">Pop quiz: ${esc(l.title)}</h2>
+          <p>${total} quick questions, one at a time. Get ${need} right to complete the ${unit}. Get one wrong and you’ll see exactly where the answer is in your notes.</p>
         </div>
-        <ol class="q-list">${quiz.map((q, i) => questionHtml(q, i)).join('')}</ol>
-        <div class="quiz-result" aria-live="polite"></div>
+        <div class="pop-track" aria-hidden="true">${qs.map(() => '<span></span>').join('')}</div>
+        <div class="pop-stage" aria-live="polite"></div>
       </section>`;
-    host.querySelectorAll('.q').forEach((li, qi) => {
-      const q = quiz[qi];
-      li.querySelectorAll('.opt').forEach((btn, oi) => {
-        btn.addEventListener('click', () => {
-          if (li.dataset.answered) return;
-          li.dataset.answered = '1';
-          const ok = oi === q.answer;
-          answered++; if (ok) correct++;
-          revealQuestion(li, q, oi);
-          if (answered === total) finish();
-        });
-      });
-    });
+    const stage = host.querySelector('.pop-stage');
+    const dots = [...host.querySelectorAll('.pop-track span')];
+
+    function show() {
+      const q = qs[i];
+      dots.forEach((d, k) => d.classList.toggle('is-now', k === i));
+      stage.innerHTML = `
+        <div class="pop-card">
+          <p class="pop-count">Question ${i + 1} of ${total}${q.kind === 'blank' ? ' <span class="pop-kind">From your notes’ blanks</span>' : ''}</p>
+          <ol class="q-list">${questionHtml(q, i)}</ol>
+          <div class="pop-next" hidden></div>
+        </div>`;
+      const li = stage.querySelector('.q');
+      li.querySelectorAll('.opt').forEach((btn, oi) => btn.addEventListener('click', () => {
+        if (li.dataset.answered) return;
+        li.dataset.answered = '1';
+        const ok = oi === q.answer;
+        const ref = ok ? null : noteRef(l, q);
+        results.push({ q, ok, ref });
+        dots[i].classList.add(ok ? 'is-right' : 'is-wrong');
+        revealQuestion(li, q, oi, noteRefHtml(l, ref));
+        const go = li.querySelector('[data-goto]');
+        if (go) go.addEventListener('click', () => { openSource(ref.target); showReturn(stage.querySelector('.pop-card'), 'Back to the pop quiz'); });
+        const nx = stage.querySelector('.pop-next');
+        nx.hidden = false;
+        nx.innerHTML = `<button type="button" class="btn btn-primary">${i + 1 < total ? 'Next question →' : 'See my score'}</button>`;
+        nx.querySelector('button').addEventListener('click', () => { hideReturn(); i++; if (i < total) show(); else finish(); stage.querySelector('button, .opt')?.focus({ preventScroll: true }); });
+      }));
+    }
+
     function finish() {
+      dots.forEach(d => d.classList.remove('is-now'));
+      const correct = results.filter(r => r.ok).length;
       const prev = data.quiz[l.id];
       data.quiz[l.id] = { best: Math.max(correct, prev ? prev.best : 0), total };
       const passed = correct >= need;
       if (passed) data.done[l.id] = true;
       save(); onChange();
-      const res = host.querySelector('.quiz-result');
-      res.className = 'quiz-result ' + (passed ? 'is-pass' : 'is-retry');
-      const unit = l.module ? 'topic' : 'lesson';
-      res.innerHTML = `
-        <p class="score"><strong>${correct}</strong> of ${total} correct</p>
-        <p>${passed ? `${unit[0].toUpperCase() + unit.slice(1)} complete. Nice work.` : `You need ${need} to complete the ${unit}. Review the sections behind the questions you missed, then try again.`}</p>
+      const pct = correct / total, R = 34, C = 2 * Math.PI * R;
+      const missed = results.filter(r => !r.ok);
+      stage.innerHTML = `
+        <div class="pop-result ${passed ? 'is-pass' : 'is-retry'}">
+          <svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="${R}" class="ring-bg"/><circle cx="40" cy="40" r="${R}" class="ring-fg" stroke-dasharray="${C * pct} ${C}"/></svg>
+          <div class="pop-score">
+            <p class="score"><strong>${correct}</strong> of ${total} correct</p>
+            <p>${passed ? `${unit[0].toUpperCase() + unit.slice(1)} complete. Nice work.` : `You need ${need} to complete the ${unit}. Go over the parts of your notes below, then try a new pop quiz.`}</p>
+          </div>
+        </div>
+        ${missed.length ? `<div class="pop-missed"><p class="pop-missed-h">Revise these parts of your notes</p><ul>${missed.map((r, k) => `
+          <li><span class="pm-q">${esc(r.q.q)}</span><span class="pm-a">Answer: ${esc(r.q.options[r.q.answer])}</span>${r.ref ? `<button type="button" class="btn btn-small" data-miss="${k}">📍 ${esc(r.ref.where)}</button>` : ''}</li>`).join('')}</ul></div>` : ''}
         <div class="actions">
-          <button type="button" class="btn${passed ? '' : ' btn-primary'}" data-act="retry">Try the quiz again</button>
+          <button type="button" class="btn${passed ? '' : ' btn-primary'}" data-act="retry">Try a new pop quiz</button>
           ${passed && next ? `<a class="btn btn-primary" href="#lesson-${next.id}">Next: ${esc(next.title)}</a>` : ''}
           ${passed && !next ? '<a class="btn btn-primary" href="#exam">Take the practice exam</a>' : ''}
         </div>`;
-      res.querySelector('[data-act="retry"]').addEventListener('click', () => {
+      stage.querySelectorAll('[data-miss]').forEach(b => b.addEventListener('click', () => {
+        openSource(missed[+b.dataset.miss].ref.target);
+        showReturn(stage, 'Back to my score');
+      }));
+      stage.querySelector('[data-act="retry"]').addEventListener('click', () => {
         lessonQuiz(host, l, next, onChange);
         host.querySelector('.quiz').scrollIntoView({ block: 'start' });
       });
     }
+    show();
   }
 
   function questionHtml(q, i, extra) {
@@ -869,7 +1058,10 @@
       stage.querySelectorAll('.q').forEach((li, i) => {
         const { q, l } = qs[i];
         if (picks[i] === q.answer) score++;
-        revealQuestion(li, q, picks[i], picks[i] === q.answer ? '' : `<p class="fb-link"><a href="#lesson-${l.id}">Review ${l.label}: ${esc(l.title)}</a></p>`);
+        const ref = picks[i] === q.answer ? null : noteRef(l, q);
+        revealQuestion(li, q, picks[i], picks[i] === q.answer ? '' : (ref ? noteRefHtml(l, ref) : `<p class="fb-link"><a href="#lesson-${l.id}">Review ${l.label}: ${esc(l.title)}</a></p>`));
+        const go = li.querySelector('[data-goto]');
+        if (go) go.addEventListener('click', () => openSource(ref.target));
         li.querySelectorAll('.opt').forEach(o => o.classList.remove('is-picked'));
       });
       const prevBest = data.exams[st.scope] ? data.exams[st.scope].best / data.exams[st.scope].total : -1;
@@ -879,7 +1071,7 @@
       bar.outerHTML = `
         <div class="quiz-result ${pctScore >= 75 ? 'is-pass' : 'is-retry'}">
           <p class="score"><strong>${score}</strong> of ${qs.length} correct (${pctScore}%)</p>
-          <p>${pctScore >= 90 ? 'Excellent. You clearly know this material.' : pctScore >= 75 ? 'Solid work. Review the questions you missed below.' : 'Keep going. Each missed question links to the topic or lesson that covers it.'}</p>
+          <p>${pctScore >= 90 ? 'Excellent. You clearly know this material.' : pctScore >= 75 ? 'Solid work. Review the questions you missed below.' : 'Keep going. Each missed question shows where its answer is in your notes.'}</p>
           <div class="actions"><button type="button" class="btn btn-primary" data-act="new">New exam</button></div>
         </div>`;
       stage.querySelector('.exam-msg').textContent = '';

@@ -1159,3 +1159,40 @@ body.helper-open .helper-fab { display: none; }
 .features li { display: flex; align-items: flex-start; gap: 0.7rem; padding: 0.85rem 0.95rem; background: var(--sheet); border: 1px solid var(--rule); border-radius: 14px; font-size: 0.88rem; line-height: 1.45; color: var(--ink-2); }
 .features strong { display: block; color: var(--ink); font-size: 0.95rem; }
 .ft-ico { display: grid; place-items: center; flex: none; width: 2.3rem; height: 2.3rem; border-radius: 11px; background: var(--accent-soft); font-size: 1.2rem; }
+
+/* mini graphs */
+.vg { display: grid; gap: 0.75rem; justify-content: center; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 330px)); }
+.vg-panel { display: flex; flex-direction: column; min-width: 0; padding: 0.7rem 0.7rem 0.6rem; background: var(--paper); border-radius: 12px; }
+.vg-cap { margin: 0 0 0.2rem !important; text-align: center; font-weight: 700; font-size: 0.88rem; line-height: 1.3; }
+.vg-sub { margin: 0.25rem 0 0 !important; text-align: center; font-size: 0.8rem; line-height: 1.45; color: var(--ink-2); }
+.vg-svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-body); }
+.vg-svg .g-axis { stroke: var(--ink-2); stroke-width: 1.4; }
+.vg-svg .g-axl { fill: var(--ink-2); font-size: 10.5px; font-weight: 600; }
+.vg-svg .g-tick { fill: var(--ink-2); font-family: var(--font-mono); font-size: 10px; }
+.vg-svg .g-guide { fill: none; stroke: var(--ink-3); stroke-width: 1.1; stroke-dasharray: 3 3; }
+.vg-svg .g-line { fill: none; stroke: var(--ink); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.vg-svg .g-dash { stroke-dasharray: 6 4; }
+.vg-svg .g-ghost { opacity: 0.45; }
+.vg-svg .g-lab { fill: var(--ink); font-size: 11.5px; font-weight: 700; }
+.vg-svg .g-demand { stroke: var(--demand); } .vg-svg text.g-demand { fill: var(--demand); }
+.vg-svg .g-supply { stroke: var(--supply); } .vg-svg text.g-supply { fill: var(--supply); }
+.vg-svg .g-accent { stroke: var(--accent); } .vg-svg text.g-accent { fill: var(--accent); }
+.vg-svg .g-gold { stroke: var(--gold); } .vg-svg text.g-gold { fill: var(--gold); }
+.vg-svg .g-bad { stroke: var(--bad); } .vg-svg text.g-bad { fill: var(--bad); }
+.vg-svg .g-good { stroke: var(--good); } .vg-svg text.g-good { fill: var(--good); }
+.vg-svg .g-ink { stroke: var(--ink-2); } .vg-svg text.g-ink { fill: var(--ink-2); }
+.vg-svg text { stroke: none !important; }
+.vg-svg .g-area { stroke: none; opacity: 0.9; }
+.vg-svg .g-area.g-gold { fill: var(--gold-soft); } .vg-svg .g-area.g-good { fill: color-mix(in srgb, var(--good) 26%, transparent); } .vg-svg .g-area.g-bad { fill: color-mix(in srgb, var(--bad) 24%, transparent); }
+.vg-svg .g-area-l { fill: var(--ink); font-size: 11.5px; font-weight: 700; }
+.vg-svg .g-dot { fill: var(--sheet); stroke: var(--ink); stroke-width: 2; }
+.vg-svg .g-dot.g-ink { fill: var(--ink); stroke: var(--sheet); }
+.vg-svg .g-dot.g-good { fill: var(--good); stroke: var(--sheet); } .vg-svg .g-dot.g-gold { fill: var(--gold); stroke: var(--sheet); }
+.vg-svg .g-dot.g-bad.g-hollow { fill: var(--sheet); stroke: var(--bad); }
+.vg-svg .g-dot-l { fill: var(--ink); font-size: 10.5px; font-weight: 600; }
+.vg-svg .g-arrow line { stroke: var(--ink); stroke-width: 2; }
+.vg-svg .g-arrow polygon { fill: var(--ink); }
+.vg-svg .g-arrow.g-bad line { stroke: var(--bad); } .vg-svg .g-arrow.g-bad polygon { fill: var(--bad); }
+.vg-svg .g-brk line { stroke-width: 1.6; }
+.vg-svg .g-brk-l { font-size: 10.5px; font-weight: 700; }
+.vg-svg .g-note { fill: var(--ink-2); font-size: 10px; font-weight: 600; }

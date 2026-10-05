@@ -28,7 +28,7 @@ Each topic keeps the notes' section numbers and examples, and adds:
 - an interactive graph or calculator for the topic
 - **Fill in your notes:** model answers for every blank (*) in the student notes, with an option to hide them and test yourself
 - **Do you know?:** the notes' revision questions, with answers you can reveal one at a time
-- **pictures that explain the ideas:** flow charts (e.g. money supply ↑ → interest rate ↓ → AD ↑ → output ↑), side-by-side comparisons, scales (what a PED number means), labelled formulas, decision ladders (the shutdown rule) and breakdowns (who counts as unemployed): 57 diagrams across the 13 topics
+- **pictures that explain the ideas:** flow charts (e.g. money supply ↑ → interest rate ↓ → AD ↑ → output ↑), side-by-side comparisons, scales (what a PED number means), labelled formulas, decision ladders (the shutdown rule) and breakdowns (who counts as unemployed), plus 42 small labelled graphs of the key diagrams (demand and supply shifts, surplus and shortage, ceilings and floors, elasticity shapes, MP and AP, the kinked demand curve, profit and loss rectangles, AD-AS situations and policies, the money market): 90 visuals across the 13 topics
 - a **roadmap** at the top showing every section, the key terms, the blanks, the revision questions and the pop quiz, with the section you're reading highlighted
 - a key-terms list
 - a **pop quiz** at the end: 10 questions one at a time (the topic's 8 quiz questions plus 2 made from the notes' blanks), with a progress bar and a score at the end. Get 8 right to complete the topic.
@@ -88,9 +88,10 @@ js/content/module-b.js  module Topics 5–7
 js/content/module-c.js  module Topics 8–10
 js/content/module-d.js  module Topics 11–13
 js/content/visuals.js   the diagrams for each topic (which heading each goes after)
+js/content/visuals-more.js  the mini graphs and extra diagrams
 js/content/u1.js …      wider-course lessons, one file per unit
 js/widgets.js           the interactive graphs and calculators
-js/visuals.js           draws the diagrams (flow, cards, compare, scale, equation, decide, tree)
+js/visuals.js           draws the diagrams (flow, cards, compare, scale, equation, decide, tree, graph)
 js/app.js               routing, quizzes, flashcards, glossary, exam, progress
 js/helper.js            the study helper panel (notes search, Claude, citations)
 ```

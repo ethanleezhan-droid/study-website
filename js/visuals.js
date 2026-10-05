@@ -66,11 +66,64 @@
     }
   };
 
+  /* Mini graphs: small, labelled economics diagrams on a 0–100 grid (no numbers on the
+     axes, since they show the idea rather than data). One or more panels side by side. */
+  const GW = 260, GH = 200, GL = 30, GR = 248, GT = 22, GB = 170;
+  const gx = x => GL + x / 100 * (GR - GL), gy = y => GB - y / 100 * (GB - GT);
+  const pts = p => p.map(([x, y]) => `${gx(x).toFixed(1)},${gy(y).toFixed(1)}`).join(' ');
+  const t = (x, y, s, cls, anchor) => `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="${cls}" text-anchor="${anchor || 'middle'}">${rich(s)}</text>`;
+  function arrowSvg(a, b, cls) {
+    const x1 = gx(a[0]), y1 = gy(a[1]), x2 = gx(b[0]), y2 = gy(b[1]);
+    const len = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / len, uy = (y2 - y1) / len, hl = 7, hw = 4;
+    const ex = x2 - ux * 2, ey = y2 - uy * 2;
+    return `<g class="g-arrow ${cls || ''}"><line x1="${x1}" y1="${y1}" x2="${ex - ux * 5}" y2="${ey - uy * 5}"/><polygon points="${ex},${ey} ${ex - ux * hl - uy * hw},${ey - uy * hl + ux * hw} ${ex - ux * hl + uy * hw},${ey - uy * hl - ux * hw}"/></g>`;
+  }
+  function panel(p) {
+    let s = '';
+    (p.areas || []).forEach(a => { s += `<polygon class="g-area g-${a.c || 'gold'}" points="${pts(a.p)}"/>`; if (a.l) s += t(gx(a.at[0]), gy(a.at[1]), a.l, 'g-area-l'); });
+    s += `<line class="g-axis" x1="${GL}" y1="${GT - 6}" x2="${GL}" y2="${GB}"/><line class="g-axis" x1="${GL}" y1="${GB}" x2="${GR + 4}" y2="${GB}"/>`;
+    s += t(GL - 4, GT - 10, p.y || 'Price', 'g-axl', 'start') + t(GR + 4, GB + 24, p.x || 'Quantity', 'g-axl', 'end');
+    (p.guides || []).forEach(g => {
+      const [x, y] = g.at;
+      s += `<polyline class="g-guide" points="${gx(0)},${gy(y)} ${gx(x)},${gy(y)} ${gx(x)},${gy(0)}"/>`;
+      if (g.yl) s += t(GL - 4, gy(y) + 4, g.yl, 'g-tick', 'end');
+      if (g.xl) s += t(gx(x), GB + 12, g.xl, 'g-tick');
+    });
+    (p.hlines || []).forEach(h => { s += `<line class="g-line g-${h.c || 'ink'}${h.dash ? ' g-dash' : ''}" x1="${GL}" y1="${gy(h.y)}" x2="${GR}" y2="${gy(h.y)}"/>`; if (h.l) { const o = h.lo || [0, -5]; s += t(h.lp === 'start' ? GL + 4 + o[0] : GR + o[0], gy(h.y) + o[1], h.l, `g-lab g-${h.c || 'ink'}`, h.lp === 'start' ? 'start' : 'end'); } });
+    (p.vlines || []).forEach(h => { s += `<line class="g-line g-${h.c || 'ink'}${h.dash ? ' g-dash' : ''}" x1="${gx(h.x)}" y1="${GT}" x2="${gx(h.x)}" y2="${GB}"/>`; if (h.l) s += t(gx(h.x) + 4, GT + 4, h.l, `g-lab g-${h.c || 'ink'}`, 'start'); });
+    (p.lines || []).forEach(l => {
+      if (l.p.length > 2) l = Object.assign({}, l, { p: l.p.filter(([, y]) => y >= -1 && y <= 101) });
+      s += `<polyline class="g-line g-${l.c || 'ink'}${l.dash ? ' g-dash' : ''}${l.ghost ? ' g-ghost' : ''}" points="${pts(l.p)}"/>`;
+      if (l.l) {
+        const e = l.lp === 'start' ? l.p[0] : l.p[l.p.length - 1];
+        const off = l.lo || [4, -5];
+        s += t(gx(e[0]) + off[0], gy(e[1]) + off[1], l.l, `g-lab g-${l.c || 'ink'}${l.ghost ? ' g-ghost' : ''}`, off[0] < 0 ? 'end' : 'start');
+      }
+    });
+    (p.brackets || []).forEach(b => {
+      const y = gy(b.y) + (b.below === false ? -8 : 8);
+      s += `<g class="g-brk g-${b.c || 'bad'}"><line x1="${gx(b.x1)}" y1="${y}" x2="${gx(b.x2)}" y2="${y}"/><line x1="${gx(b.x1)}" y1="${y - 4}" x2="${gx(b.x1)}" y2="${y + 4}"/><line x1="${gx(b.x2)}" y1="${y - 4}" x2="${gx(b.x2)}" y2="${y + 4}"/></g>`;
+      s += t((gx(b.x1) + gx(b.x2)) / 2, y + (b.below === false ? -5 : 13), b.l, `g-brk-l g-${b.c || 'bad'}`);
+    });
+    (p.arrows || []).forEach(a => { s += arrowSvg(a.from, a.to, a.c ? 'g-' + a.c : ''); });
+    (p.dots || []).forEach(d => {
+      s += `<circle class="g-dot${d.c ? ' g-' + d.c : ''}${d.hollow ? ' g-hollow' : ''}" cx="${gx(d.at[0])}" cy="${gy(d.at[1])}" r="4"/>`;
+      if (d.l) { const o = d.o || [6, -6]; s += t(gx(d.at[0]) + o[0], gy(d.at[1]) + o[1], d.l, 'g-dot-l', o[0] < 0 ? 'end' : 'start'); }
+    });
+    (p.texts || []).forEach(x => { s += t(gx(x.at[0]), gy(x.at[1]), x.t, 'g-note' + (x.c ? ' g-' + x.c : ''), x.a || 'middle'); });
+    return `<div class="vg-panel">
+      ${p.cap ? `<p class="vg-cap">${rich(p.cap)}</p>` : ''}
+      <svg viewBox="0 0 ${GW} ${GH}" class="vg-svg" role="img" aria-label="${esc((p.cap || '') + (p.alt ? '. ' + p.alt : ''))}">${s}</svg>
+      ${p.sub ? `<p class="vg-sub">${rich(p.sub)}</p>` : ''}
+    </div>`;
+  }
+  R.graph = v => `<div class="vg" style="--cols:${v.cols || Math.min(v.panels.length, 3)}">${v.panels.map(panel).join('')}</div>`;
+
   function render(v) {
     const body = R[v.type] ? R[v.type](v) : '';
     if (!body) return '';
     return `<figure class="vis vis-${v.type}">
-      ${v.title ? `<figcaption class="vis-cap"><span class="vis-kicker">${esc(v.kicker || 'In a picture')}</span>${rich(v.title)}</figcaption>` : ''}
+      ${v.title ? `<figcaption class="vis-cap"><span class="vis-kicker">${esc(v.kicker || (v.type === 'graph' ? 'On the graph' : 'In a picture'))}</span>${rich(v.title)}</figcaption>` : ''}
       ${body}
       ${v.note ? `<p class="vis-note">${rich(v.note)}</p>` : ''}
     </figure>`;

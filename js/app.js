@@ -15,9 +15,12 @@
   const moduleLessons = lessons.filter(l => l.module);
   const TOPIC_ICONS = { 'm-basic': '⚖️', 'm-demand': '🛒', 'm-supply': '🏭', 'm-equilibrium': '🎯', 'm-elasticity': '🧮', 'm-costs': '⚙️', 'm-structures': '🏢',
     'm-profit': '💰', 'm-unemployment': '👷', 'm-gdp': '📊', 'm-adas': '📈', 'm-fiscal': '🏛️', 'm-monetary': '🏦' };
+  const TOPIC_HUES = [152, 212, 24, 280, 45, 190, 330, 100, 4, 230, 170, 260, 38];
   lessons.forEach(l => { l.icon = TOPIC_ICONS[l.id] || '📘'; });
   const introLessons = lessons.filter(l => !l.module);
   const moduleUnits = units.filter(u => u.module);
+  moduleLessons.forEach((l, i) => { l.hue = TOPIC_HUES[i % TOPIC_HUES.length]; });
+  introLessons.forEach(l => { l.hue = 152; });
   const byId = Object.fromEntries(lessons.map(l => [l.id, l]));
   const lessonsIn = u => lessons.filter(l => l.unit === u.id);
   const topicRange = ls => ls.length === 1 ? `Topic ${ls[0].n}` : `Topics ${ls[0].n}–${ls[ls.length - 1].n}`;
@@ -45,7 +48,7 @@
 
   /* ---------- progress storage (per browser) ---------- */
   const KEY = 'marginal-notes-v1';
-  const blank = () => ({ done: {}, quiz: {}, cards: {}, exams: {} });
+  const blank = () => ({ done: {}, quiz: {}, cards: {}, exams: {}, view: 'pictures' });
   let data = blank();
   try {
     const raw = localStorage.getItem(KEY);
@@ -188,7 +191,10 @@
      section such as the quiz. */
   function scrollToTarget(t) {
     let el = null;
-    if (t.kind === 'heading') el = main.querySelectorAll('.prose > h2, .prose > h3')[t.index];
+    if (t.kind === 'heading') {
+      el = main.querySelectorAll('.prose > h2, .prose > h3')[t.index];
+      for (let n = el && el.nextElementSibling; n && !/^H[23]$/.test(n.tagName); n = n.nextElementSibling) if (n.matches('details.more')) n.open = true;
+    }
     else if (t.kind === 'term') el = main.querySelectorAll('.term-list > div')[t.index];
     else if (t.kind === 'blank') el = main.querySelectorAll('.blanks-table tbody tr')[t.index];
     else if (t.kind === 'review') { el = main.querySelectorAll('.review .rv')[t.index]; if (el) el.open = true; }
@@ -229,10 +235,11 @@
     return `<ol class="topic-grid">${ls.map(l => {
       const q = data.quiz[l.id], done = !!data.done[l.id];
       return `
-          <li><a class="topic-card${done ? ' is-done' : ''}" href="#lesson-${l.id}">
+          <li><a class="topic-card${done ? ' is-done' : ''}" href="#lesson-${l.id}" style="--hue:${l.hue}">
             <span class="tc-top"><span class="tc-ico" aria-hidden="true">${l.icon}</span><span class="tc-n">Topic ${l.n}</span>${done ? '<span class="tc-done" aria-label="complete">✓</span>' : ''}</span>
             <span class="tc-title">${esc(l.title)}</span>
             <span class="tc-sum">${esc(l.summary)}</span>
+            <span class="tc-bar" aria-hidden="true"><span style="width:${done ? 100 : q ? Math.round(q.best / q.total * 100) : 0}%"></span></span>
             <span class="tc-foot"><span>${l.minutes} min</span><span>${q ? `🎯 Best ${q.best}/${q.total}` : '🎯 Pop quiz'}</span></span>
           </a></li>`;
     }).join('')}</ol>`;
@@ -257,7 +264,7 @@
         <section class="unit unit-module" aria-labelledby="unit-${u.id}">
           <header class="unit-head">
             <p class="unit-num">${topicRange(ls)}</p>
-            <h3 id="unit-${u.id}">${esc(u.title)}</h3>
+            <h3 id="unit-${u.id}"><span class="unit-ico" aria-hidden="true">${u.id === 'm' ? '🔬' : '🌏'}</span>${esc(u.title)}</h3>
             <p class="unit-blurb">${esc(u.blurb)}</p>
             ${progressLine(ls)}
           </header>
@@ -283,14 +290,19 @@
     <div class="wrap">
       <section class="hero">
         <div class="hero-copy">
-          <p class="eyebrow">Your economics module, ${moduleRange}</p>
-          <h1>Economics is the study of choices made under scarcity.</h1>
-          <p class="lede">Everything in your course notes, taught step by step with the same section numbers and examples, plus pictures, graphs you can move and a pop quiz at the end of every topic.</p>
-          <div class="actions">${primary}<a class="btn" href="#labs">Open the labs</a></div>
-          <p class="hero-progress">${nMod === 0 ? 'Your progress is saved in this browser as you go.' : `You’ve completed ${nMod} of ${moduleLessons.length} topics.`}</p>
+          <p class="hero-chip"><span aria-hidden="true">📚</span> Your economics module · ${moduleRange}</p>
+          <h1>Economics, <span class="hl">explained in pictures</span>.</h1>
+          <p class="lede">Every topic in your notes, with diagrams, graphs you can move, and a pop quiz that sends you straight back to the part of your notes you missed.</p>
+          <div class="actions">${primary}<a class="btn btn-ghost" href="#labs">Open the labs</a></div>
+          <ul class="hero-stats">
+            <li><strong>${moduleLessons.length}</strong><span>topics</span></li>
+            <li><strong>${Object.values(ECON.visualData || {}).reduce((n, v) => n + v.length, 0)}</strong><span>pictures and graphs</span></li>
+            <li><strong>${nMod}/${moduleLessons.length}</strong><span>completed</span></li>
+          </ul>
+          ${next && nMod > 0 ? `<a class="continue" href="#lesson-${next.id}" style="--hue:${next.hue}"><span class="continue-ico" aria-hidden="true">${next.icon}</span><span class="continue-txt"><span class="continue-k">Continue where you left off</span><span class="continue-t">${next.label}: ${esc(next.title)}</span></span><span class="continue-go" aria-hidden="true">→</span></a>` : ''}
         </div>
         <div class="hero-demo">
-          <p class="demo-label">A live market</p>
+          <p class="demo-label"><span class="live-dot" aria-hidden="true"></span> Try it: a live market</p>
           <div data-widget="market" data-preset="hero"></div>
         </div>
       </section>
@@ -384,6 +396,41 @@
     return html;
   }
 
+  /* Picture view: in each section keep the heading, pictures, graphs, key boxes and formulas,
+     and fold the longer explanation into a "Read the full explanation" button. Sections with
+     no picture keep their first paragraph. Nothing is removed; Full notes shows it all. */
+  const isHead = el => /^H[23]$/.test(el.tagName);
+  const keeps = el => isHead(el) || el.matches('.vis, [data-widget], .widget-host, .formula, .note.key, .note.pitfall, details.more');
+  function condense(prose) {
+    if (prose.querySelector(':scope > details.more')) return;
+    [...prose.children].forEach((el, i) => { if (!el.dataset.ord) el.dataset.ord = String(i); });
+    const sections = [[]];
+    [...prose.children].forEach(el => { if (isHead(el)) sections.push([el]); else sections[sections.length - 1].push(el); });
+    sections.forEach(sec => {
+      const body = sec.length && isHead(sec[0]) ? sec.slice(1) : sec;
+      const pictured = body.some(el => el.matches('.vis, [data-widget], .widget-host'));
+      let fold = body.filter(el => !keeps(el));
+      if (!pictured && fold.length && fold[0].tagName === 'P') fold = fold.slice(1);
+      if (!fold.length) return;
+      const words = fold.reduce((n, el) => n + el.textContent.trim().split(/\s+/).length, 0);
+      if (words < 25) return;
+      const d = document.createElement('details');
+      d.className = 'more';
+      d.innerHTML = `<summary><span class="more-ico" aria-hidden="true">📖</span><span>Read the full explanation</span><span class="more-n">${words} words</span></summary><div class="more-body"></div>`;
+      const last = body[body.length - 1];
+      last.after(d);
+      fold.forEach(el => d.lastElementChild.appendChild(el));
+    });
+  }
+  function expandAll(prose) {
+    prose.querySelectorAll(':scope > details.more').forEach(d => {
+      [...d.lastElementChild.children].forEach(el => d.before(el));
+      d.remove();
+    });
+    /* back into the original reading order */
+    [...prose.children].filter(el => el.dataset.ord).sort((a, b) => a.dataset.ord - b.dataset.ord).forEach(el => prose.appendChild(el));
+  }
+
   function renderLesson(l) {
     setTitle(l.title);
     const u = unitById[l.unit];
@@ -394,7 +441,7 @@
     main.innerHTML = `
     <div class="wrap lesson-layout">
       <aside class="syllabus" aria-label="Course contents">${syllabusHtml(l)}</aside>
-      <article class="lesson">
+      <article class="lesson" style="--hue:${l.hue}">
         <details class="syllabus-mobile">
           <summary>All topics and lessons</summary>
           ${syllabusHtml(l)}
@@ -404,6 +451,7 @@
           <h1>${l.module ? `<span class="lh-ico" aria-hidden="true">${l.icon}</span>` : ''}${esc(l.title)}</h1>
           <p class="lede">${esc(l.summary)}</p>
           <div class="meta"><span>${l.minutes} min read</span>${l.module ? `<span class="from-notes">Matches Topic ${l.n} in your notes</span>` : ''}<span id="lesson-status">${statusChip(l)}</span>
+            <span class="view-toggle" role="radiogroup" aria-label="How much text to show"><button type="button" role="radio" data-view="pictures">🖼️ Picture view</button><button type="button" role="radio" data-view="full">📖 Full notes</button></span>
             <button type="button" class="btn btn-quiet btn-small" id="mark-done"></button></div>
         </header>
         <nav class="toc" id="toc" aria-label="On this page" hidden></nav>
@@ -441,7 +489,16 @@
     refreshStatus();
     wireReview();
     wireBlanks();
-    if (ECON.visual) ECON.visual.place(main.querySelector('.prose'), l.id);
+    const prose = main.querySelector('.prose');
+    if (ECON.visual) ECON.visual.place(prose, l.id);
+    const viewBtns = [...main.querySelectorAll('[data-view]')];
+    const setView = v => {
+      data.view = v;
+      viewBtns.forEach(b => { b.setAttribute('aria-checked', String(b.dataset.view === v)); b.tabIndex = b.dataset.view === v ? 0 : -1; });
+      if (v === 'pictures') condense(prose); else expandAll(prose);
+    };
+    viewBtns.forEach(b => b.addEventListener('click', () => { setView(b.dataset.view); save(); }));
+    setView(data.view === 'full' ? 'full' : 'pictures');
     lessonQuiz(main.querySelector('#quiz-host'), l, next, refreshStatus);
     buildToc();
   }

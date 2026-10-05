@@ -29,6 +29,7 @@ Each topic keeps the notes' section numbers and examples, and adds:
 - **Fill in your notes:** model answers for every blank (*) in the student notes, with an option to hide them and test yourself
 - **Do you know?:** the notes' revision questions, with answers you can reveal one at a time
 - **pictures that explain the ideas:** flow charts (e.g. money supply ↑ → interest rate ↓ → AD ↑ → output ↑), side-by-side comparisons, scales (what a PED number means), labelled formulas, decision ladders (the shutdown rule) and breakdowns (who counts as unemployed), plus 42 small labelled graphs of the key diagrams (demand and supply shifts, surplus and shortage, ceilings and floors, elasticity shapes, MP and AP, the kinked demand curve, profit and loss rectangles, AD-AS situations and policies, the money market): 90 visuals across the 13 topics
+- **Picture view** (the default): each section shows its heading, pictures, graphs, key boxes and formulas, and folds the longer explanation into a *Read the full explanation* button. *Full notes* shows all the text in its original order, and jumping to a section from a quiz or the helper opens its folded text.
 - a **roadmap** at the top showing every section, the key terms, the blanks, the revision questions and the pop quiz, with the section you're reading highlighted
 - a key-terms list
 - a **pop quiz** at the end: 10 questions one at a time (the topic's 8 quiz questions plus 2 made from the notes' blanks), with a progress bar and a score at the end. Get 8 right to complete the topic.
